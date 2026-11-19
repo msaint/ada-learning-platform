@@ -45,7 +45,7 @@ export function AccountRequiredDialog() {
         <Link href={authHref("signin", pathname)} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong px-4 text-[0.95rem] font-medium hover:bg-surface">
           Sign in
         </Link>
-        <Link href={authHref("signup", pathname)} className="inline-flex min-h-11 items-center rounded-lg bg-accent px-4 text-[0.95rem] font-medium text-white hover:bg-accent-strong">
+        <Link href={authHref("signup", pathname)} className="btn-tactile-primary inline-flex min-h-11 items-center rounded-xl bg-accent px-4 text-[0.95rem] font-semibold text-accent-ink">
           Create account
         </Link>
       </div>

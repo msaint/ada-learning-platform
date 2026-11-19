@@ -27,10 +27,13 @@ export function ReviewQueue({ due, upcoming }: { due: DueReview[]; upcoming: Due
       ) : (
         <ul className="mb-10 space-y-4">
           {[...byCourse.entries()].map(([courseId, items]) => (
-            <li key={courseId} className="rounded-xl border border-line px-5 py-4">
-              <div className="mb-2 flex flex-wrap items-center gap-3">
-                <h2 className="min-w-0 flex-1 font-medium break-words">{items[0].courseTitle}</h2>
-                <Link href={`/app/courses/${courseId}?kind=review`} className="inline-flex min-h-11 items-center rounded-lg bg-accent px-4 text-[0.95rem] font-medium text-white hover:bg-accent-strong">
+            <li key={courseId} className="rounded-2xl border border-line bg-surface px-5 py-4">
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <h2 className="min-w-0 flex-1 font-semibold break-words text-ink">{items[0].courseTitle}</h2>
+                <Link
+                  href={`/app/courses/${courseId}?kind=review`}
+                  className="btn-tactile-primary inline-flex min-h-11 items-center rounded-xl bg-accent px-4 text-[0.95rem] font-semibold whitespace-nowrap text-accent-ink hover:bg-accent-strong"
+                >
                   Start review
                 </Link>
               </div>

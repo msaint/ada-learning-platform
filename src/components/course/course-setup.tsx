@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, newKey } from "@/lib/client/api";
 import type { CourseDraftView } from "@/lib/schemas/dto";
 import { Button, InlineError, Spinner } from "@/components/ui/primitives";
+import { CharacterCompanion } from "@/components/characters/character-companion";
+import type { CharacterPresence } from "@/components/characters/state-machine";
 
 type Pending = null | "answer" | "back" | "propose" | "convert" | "adjust" | "background";
 
@@ -79,12 +81,35 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const learnerTurns = draft.turns.slice(1);
   const thinking = pending === "answer" || pending === "propose" || pending === "adjust" || pending === "back" || pending === "background";
 
+  const setupPresence: CharacterPresence =
+    draft.state === "ready"
+      ? {
+          character: "prism",
+          secondary: "spark",
+          mood: "celebrating",
+          trigger: "checkpoint_passed",
+          line: "Path locked in. Ready to start, or want to tune the focus first?",
+        }
+      : learnerTurns.length > 0
+        ? {
+            character: "link",
+            mood: thinking ? "thinking" : "guiding",
+            trigger: "hint_or_bridge",
+            line: thinking ? "Connecting your answers into a starting path." : "Pulling your goals together so we skip what you don't need.",
+          }
+        : {
+            character: "spark",
+            mood: "excited",
+            trigger: "cold_start",
+            line: "Ooh, fun topic. A quick question or two and we'll map out your first steps.",
+          };
+
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10 md:py-16">
       <p className="mb-1 text-sm text-muted">New course</p>
-      <p className={`${draft.sourcesRead.length ? "mb-3" : "mb-8"} text-xl font-medium break-words text-ink`}>{draft.topic}</p>
+      <p className={`${draft.sourcesRead.length ? "mb-3" : "mb-6"} text-xl font-semibold break-words text-ink`}>{draft.topic}</p>
       {draft.sourcesRead.length > 0 && (
-        <p className="mb-8 text-sm text-muted">
+        <p className="mb-6 text-sm text-muted">
           Ada read:{" "}
           {draft.sourcesRead.map((s, i) => (
             <span key={s.url}>
@@ -97,8 +122,10 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
         </p>
       )}
 
+      <CharacterCompanion presence={setupPresence} compact className="mb-7" />
+
       {learnerTurns.length > 0 && (
-        <ol aria-label="Your answers so far" className="mb-8 space-y-2 border-l-2 border-line pl-4 text-sm break-words">
+        <ol aria-label="Your answers so far" className="mb-8 space-y-2 rounded-xl border border-line bg-surface/60 px-4 py-3 text-sm break-words">
           {learnerTurns.map((t, i) => (
             <li key={i} className={t.role === "ada" ? "text-muted" : "text-ink-soft"}>
               {t.role === "ada" ? t.text : <span className="font-medium text-ink">{t.text}</span>}
@@ -115,11 +142,11 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
 
       {draft.state === "collecting" && q && !thinking && (
         <section aria-labelledby="ada-question">
-          <h1 id="ada-question" ref={headingRef} tabIndex={-1} className="mb-5 text-2xl leading-snug font-semibold tracking-tight focus:outline-none">
+          <h1 id="ada-question" ref={headingRef} tabIndex={-1} className="mb-5 text-2xl leading-snug font-semibold tracking-tight text-ink focus:outline-none">
             {q.text}
           </h1>
           {q.options.length > 0 && (
-            <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Quick answers">
+            <div className="mb-4 flex flex-wrap gap-2.5" role="group" aria-label="Quick answers">
               {q.options.map((o) => (
                 <Button key={o} onClick={() => answer(o)} disabled={!!pending}>
                   {o}
@@ -143,10 +170,15 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
               maxLength={1000}
               onChange={(e) => setText(e.target.value)}
               placeholder="Or answer in your own words"
-              className="min-h-12 w-full rounded-xl border border-line-strong bg-paper px-4 pr-14 text-ink placeholder:text-muted/70 focus:border-muted focus:outline-none"
+              className="min-h-12 w-full rounded-xl border border-line-strong bg-surface px-4 pr-14 text-ink placeholder:text-muted/75 focus:border-accent/70 focus:outline-none"
             />
-            <button type="submit" aria-label="Send answer" disabled={!text.trim() || !!pending} className="absolute top-1/2 right-1.5 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-lg bg-accent text-white disabled:opacity-30">
-              <ArrowUp className="size-4" aria-hidden />
+            <button
+              type="submit"
+              aria-label="Send answer"
+              disabled={!text.trim() || !!pending}
+              className="btn-tactile-primary absolute top-1/2 right-1.5 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-lg bg-accent text-accent-ink hover:bg-accent-strong disabled:opacity-35"
+            >
+              <ArrowUp className="size-4 stroke-[2.25]" aria-hidden />
             </button>
           </form>
           <div className="mt-4 flex flex-wrap items-center gap-1">
@@ -170,9 +202,9 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
       )}
 
       {draft.state === "ready" && draft.proposal && !thinking && (
-        <section aria-labelledby="proposal-title" className="rounded-2xl border border-line p-6">
-          <p className="mb-1 text-xs font-medium tracking-wide text-muted uppercase">{draft.proposal.intent === "goal" ? "Goal course" : "Curiosity course"}</p>
-          <h1 id="proposal-title" ref={headingRef} tabIndex={-1} className="mb-2 text-2xl font-semibold tracking-tight focus:outline-none">
+        <section aria-labelledby="proposal-title" className="rounded-2xl border border-line-strong bg-surface p-6">
+          <p className="mb-1 text-xs font-medium text-prism">{draft.proposal.intent === "goal" ? "Goal course" : "Curiosity course"}</p>
+          <h1 id="proposal-title" ref={headingRef} tabIndex={-1} className="mb-2 text-2xl font-semibold tracking-tight text-ink focus:outline-none">
             {draft.proposal.title}
           </h1>
           <p className="mb-5 leading-relaxed text-ink-soft">{draft.proposal.direction}</p>
@@ -183,7 +215,7 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
             </p>
           )}
           <h2 className="mb-2 text-sm font-medium text-ink">Your starting path</h2>
-          <ol className="mb-5 list-decimal space-y-1 pl-5 text-ink-soft">
+          <ol className="mb-5 list-decimal space-y-1.5 pl-5 text-ink-soft">
             {draft.proposal.initialConceptTitles.map((t) => (
               <li key={t}>{t}</li>
             ))}
@@ -208,17 +240,17 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
               }}
               className="space-y-3"
             >
-              <label htmlFor="adjust" className="text-sm font-medium">
+              <label htmlFor="adjust" className="text-sm font-medium text-ink">
                 What should change?
               </label>
-              <input id="adjust" autoFocus value={adjustment} maxLength={500} onChange={(e) => setAdjustment(e.target.value)} placeholder="e.g. more about the history, skip the basics" className="min-h-11 w-full rounded-lg border border-line-strong px-3 focus:border-muted focus:outline-none" />
+              <input id="adjust" autoFocus value={adjustment} maxLength={500} onChange={(e) => setAdjustment(e.target.value)} placeholder="e.g. more about the history, skip the basics" className="min-h-11 w-full rounded-xl border border-line-strong bg-paper px-3.5 text-ink placeholder:text-muted/75 focus:border-accent/70 focus:outline-none" />
               <div className="flex gap-2">
                 <Button type="submit" variant="primary" disabled={!adjustment.trim()}>Update plan</Button>
                 <Button type="button" variant="quiet" onClick={() => setAdjusting(false)}>Cancel</Button>
               </div>
             </form>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-5 flex flex-wrap gap-2.5">
               <Button variant="primary" onClick={startCourse} busy={pending === "convert"}>
                 Start course
               </Button>
@@ -255,7 +287,7 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
                 maxLength={8000}
                 value={bgText}
                 onChange={(e) => setBgText(e.target.value)}
-                className="w-full rounded-xl border border-line-strong bg-paper px-4 py-3 leading-relaxed text-ink focus:border-muted focus:outline-none"
+                className="w-full rounded-xl border border-line-strong bg-surface px-4 py-3 leading-relaxed text-ink focus:border-accent/70 focus:outline-none"
               />
               <div className="flex gap-2">
                 <Button type="submit" size="sm" variant="primary" disabled={bgText.trim() === (draft.background ?? "")}>

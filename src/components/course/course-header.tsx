@@ -71,8 +71,8 @@ export function CourseHeaderBar({ header }: { header: CourseHeader }) {
             <MoreHorizontal className="size-5" aria-hidden />
           </button>
           {menu && (
-            <div role="menu" className="absolute right-0 z-30 mt-1 w-48 rounded-lg border border-line bg-paper py-1 shadow-lg">
-              <button role="menuitem" autoFocus className="block min-h-10 w-full px-3 text-left text-sm hover:bg-surface" onClick={() => { setMenu(false); setGoalText(header.goal.text); setIntent(header.intent); setGoalOpen(true); }}>
+            <div role="menu" className="absolute right-0 z-30 mt-1 w-48 rounded-xl border border-line-strong bg-elevated py-1 shadow-xl shadow-black/40">
+              <button role="menuitem" autoFocus className="block min-h-10 w-full px-3 text-left text-sm text-ink hover:bg-surface" onClick={() => { setMenu(false); setGoalText(header.goal.text); setIntent(header.intent); setGoalOpen(true); }}>
                 Change goal
               </button>
             </div>
@@ -83,32 +83,32 @@ export function CourseHeaderBar({ header }: { header: CourseHeader }) {
         {tabs.map((t) => {
           const active = pathname === t.href;
           return (
-            <Link key={t.href} href={t.href} aria-current={active ? "page" : undefined} className={clsx("-mb-px inline-flex min-h-11 items-center border-b-2 px-3 text-sm", active ? "border-accent font-medium text-ink" : "border-transparent text-muted hover:text-ink")}>
+            <Link key={t.href} href={t.href} aria-current={active ? "page" : undefined} className={clsx("-mb-px inline-flex min-h-11 items-center border-b-2 px-3 text-sm transition-colors", active ? "border-accent font-medium text-ink" : "border-transparent text-muted hover:text-ink")}>
               {t.label}
             </Link>
           );
         })}
       </nav>
       {notice && (
-        <p role="status" className="mt-4 rounded-lg bg-accent-soft px-4 py-3 text-sm text-ink-soft">
+        <p role="status" className="mt-4 rounded-xl border border-accent/25 bg-accent-soft px-4 py-3 text-sm text-ink-soft">
           {notice}
         </p>
       )}
       <Dialog open={goalOpen} onClose={() => setGoalOpen(false)} title="Change this course's goal">
         <form onSubmit={(e) => { e.preventDefault(); saveGoal(); }} className="space-y-4">
           <p className="text-sm text-ink-soft">Ada keeps everything you&apos;ve shown so far and re-plans toward the new goal. Readiness is re-estimated against it.</p>
-          <fieldset className="flex gap-4 text-sm">
+          <fieldset className="flex gap-4 text-sm text-ink">
             <legend className="sr-only">Kind of course</legend>
-            <label className="flex min-h-11 items-center gap-2"><input type="radio" name="intent" checked={intent === "goal"} onChange={() => setIntent("goal")} /> A specific goal</label>
-            <label className="flex min-h-11 items-center gap-2"><input type="radio" name="intent" checked={intent === "curiosity"} onChange={() => setIntent("curiosity")} /> Just exploring</label>
+            <label className="flex min-h-11 items-center gap-2"><input type="radio" name="intent" checked={intent === "goal"} onChange={() => setIntent("goal")} className="accent-[var(--color-accent)]" /> A specific goal</label>
+            <label className="flex min-h-11 items-center gap-2"><input type="radio" name="intent" checked={intent === "curiosity"} onChange={() => setIntent("curiosity")} className="accent-[var(--color-accent)]" /> Just exploring</label>
           </fieldset>
           <div>
-            <label htmlFor="goal-text" className="mb-1 block text-sm font-medium">{intent === "goal" ? "What do you want to be able to do?" : "What do you want to understand?"}</label>
-            <textarea id="goal-text" rows={3} value={goalText} maxLength={600} onChange={(e) => setGoalText(e.target.value)} className="w-full rounded-lg border border-line-strong px-3 py-2 focus:border-muted focus:outline-none" />
+            <label htmlFor="goal-text" className="mb-1 block text-sm font-medium text-ink">{intent === "goal" ? "What do you want to be able to do?" : "What do you want to understand?"}</label>
+            <textarea id="goal-text" rows={3} value={goalText} maxLength={600} onChange={(e) => setGoalText(e.target.value)} className="w-full rounded-xl border border-line-strong bg-paper px-3 py-2 text-ink focus:border-accent/70 focus:outline-none" />
           </div>
           <div>
-            <label htmlFor="goal-reason" className="mb-1 block text-sm font-medium">Why the change? <span className="font-normal text-muted">(optional)</span></label>
-            <input id="goal-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} className="min-h-11 w-full rounded-lg border border-line-strong px-3 focus:border-muted focus:outline-none" />
+            <label htmlFor="goal-reason" className="mb-1 block text-sm font-medium text-ink">Why the change? <span className="font-normal text-muted">(optional)</span></label>
+            <input id="goal-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} className="min-h-11 w-full rounded-xl border border-line-strong bg-paper px-3 text-ink focus:border-accent/70 focus:outline-none" />
           </div>
           {header.goalHistory.length > 1 && (
             <details className="text-sm text-muted">

@@ -54,7 +54,7 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
         This outline is provisional — Ada adapts it as you learn{outline.curriculumVersion > 1 ? ` (revision ${outline.curriculumVersion})` : ""}.
         {outline.revisionNote ? ` ${outline.revisionNote}` : ""}
       </p>
-      <ul className="divide-y divide-line rounded-xl border border-line">
+      <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface/60">
         {outline.concepts.map((c) => {
           const expanded = open === c.id;
           return (
@@ -63,7 +63,7 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
                 aria-expanded={expanded}
                 aria-controls={`concept-${c.id}`}
                 onClick={() => setOpen(expanded ? null : c.id)}
-                className="flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface"
+                className="flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-elevated/60"
                 style={{ paddingLeft: `${1 + c.depth * 1.25}rem` }}
               >
                 <span className="min-w-0 flex-1">
@@ -108,10 +108,10 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
                             </div>
                             <Markdown compact>{n.bodyMarkdown}</Markdown>
                             {n.altExplanations.length > 0 && (
-                              <div className="mt-3 space-y-2 border-l-2 border-line pl-3">
+                              <div className="mt-3 space-y-2 rounded-xl border border-line bg-surface/70 px-3.5 py-2.5">
                                 {n.altExplanations.map((alt, j) => (
                                   <div key={j}>
-                                    <p className="mb-1 text-xs font-medium text-muted">Another angle</p>
+                                    <p className="mb-1 text-xs font-medium text-link">Another angle</p>
                                     <Markdown compact>{alt}</Markdown>
                                   </div>
                                 ))}
@@ -181,7 +181,7 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
           Curious about something related?
         </label>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <input id="branch" value={branch} maxLength={300} onChange={(e) => setBranch(e.target.value)} placeholder="e.g. wheel wear, what happens at the edge" className="min-h-11 flex-1 rounded-lg border border-line-strong px-3 focus:border-muted focus:outline-none" />
+          <input id="branch" value={branch} maxLength={300} onChange={(e) => setBranch(e.target.value)} placeholder="e.g. wheel wear, what happens at the edge" className="min-h-11 flex-1 rounded-xl border border-line-strong bg-surface px-3.5 text-ink placeholder:text-muted/75 focus:border-accent/70 focus:outline-none" />
           <Button type="submit" busy={busy} disabled={branch.trim().length < 2}>
             Add to this course
           </Button>

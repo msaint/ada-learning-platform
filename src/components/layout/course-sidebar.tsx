@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CourseListItem } from "@/lib/schemas/dto";
 import { api, ApiError } from "@/lib/client/api";
 import { Button, Dialog, InlineError } from "@/components/ui/primitives";
+import { AdaMark } from "@/components/characters/glyphs";
 import type { ShellUser } from "./app-shell";
 
 export function CourseSidebar({
@@ -31,7 +32,8 @@ export function CourseSidebar({
   return (
     <nav aria-label="Courses" className="flex h-full flex-col">
       <div className="px-4 pt-4 pb-3">
-        <Link href="/app" onClick={onNavigate} className="text-lg font-semibold tracking-tight text-ink">
+        <Link href="/app" onClick={onNavigate} className="inline-flex items-center gap-2 font-display text-lg font-semibold tracking-tight whitespace-nowrap text-ink">
+          <AdaMark size={22} />
           Ada
         </Link>
       </div>
@@ -40,9 +42,9 @@ export function CourseSidebar({
           ref={newRef}
           href="/app"
           onClick={onNavigate}
-          className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-[0.95rem] text-ink hover:bg-line/60"
+          className="btn-tactile-secondary flex min-h-11 items-center gap-2 rounded-xl border border-line-strong bg-elevated/70 px-3 text-[0.95rem] font-medium text-ink hover:border-accent/50"
         >
-          <Plus className="size-4" aria-hidden /> New course
+          <Plus className="size-4 text-accent" aria-hidden /> New course
         </Link>
       </div>
       <div className="mx-4 my-3 border-t border-line" />
@@ -59,14 +61,14 @@ export function CourseSidebar({
       </div>
       <div className="border-t border-line px-3 py-3">
         {user && (
-          <Link href="/app/review" onClick={onNavigate} className={clsx("flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm hover:bg-line/60", pathname === "/app/review" ? "text-ink" : "text-ink-soft")}>
+          <Link href="/app/review" onClick={onNavigate} className={clsx("flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm hover:bg-elevated", pathname === "/app/review" ? "bg-elevated font-medium text-ink" : "text-ink-soft")}>
             <RotateCcw className="size-4" aria-hidden /> Review
-            {anyDue && <span className="ml-auto size-2 rounded-full bg-accent" aria-label="Reviews due" />}
+            {anyDue && <span className="ml-auto text-xs font-medium text-spark">Due</span>}
           </Link>
         )}
         {user && !user.isGuest ? (
           <>
-            <Link href="/app/settings" onClick={onNavigate} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-ink-soft hover:bg-line/60">
+            <Link href="/app/settings" onClick={onNavigate} className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-ink-soft hover:bg-elevated">
               <Settings className="size-4" aria-hidden /> <span className="truncate">{user.displayName || user.email}</span>
             </Link>
             <button
@@ -75,7 +77,7 @@ export function CourseSidebar({
                 // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- full reload after auth change is intentional
                 window.location.href = "/app";
               }}
-              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm text-ink-soft hover:bg-line/60"
+              className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm text-ink-soft hover:bg-elevated"
             >
               <LogOut className="size-4" aria-hidden /> Sign out
             </button>
@@ -83,14 +85,14 @@ export function CourseSidebar({
         ) : (
           <>
             {user?.isGuest && (
-              <Link href="/app/settings" onClick={onNavigate} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-ink-soft hover:bg-line/60">
+              <Link href="/app/settings" onClick={onNavigate} className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-ink-soft hover:bg-elevated">
                 <Settings className="size-4" aria-hidden /> Guest settings
               </Link>
             )}
-            <Link href={`/login?mode=signup&next=${encodeURIComponent(pathname ?? "/app")}`} onClick={onNavigate} className="mt-1 flex min-h-11 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white hover:bg-accent-strong">
+            <Link href={`/login?mode=signup&next=${encodeURIComponent(pathname ?? "/app")}`} onClick={onNavigate} className="btn-tactile-primary mt-1.5 flex min-h-11 items-center justify-center rounded-xl bg-accent px-3 text-sm font-semibold text-accent-ink">
               Create free account
             </Link>
-            <Link href={`/login?mode=signin&next=${encodeURIComponent(pathname ?? "/app")}`} onClick={onNavigate} className="flex min-h-11 items-center justify-center rounded-lg px-3 text-sm text-ink-soft hover:bg-line/60">
+            <Link href={`/login?mode=signin&next=${encodeURIComponent(pathname ?? "/app")}`} onClick={onNavigate} className="mt-1 flex min-h-11 items-center justify-center rounded-xl px-3 text-sm text-ink-soft hover:bg-elevated">
               Sign in
             </Link>
           </>
@@ -160,12 +162,12 @@ function CourseItem({ course, active, onNavigate }: { course: CourseListItem; ac
         aria-current={active ? "page" : undefined}
         title={course.title}
         className={clsx(
-          "flex min-h-11 items-center gap-2 rounded-lg py-2 pr-10 pl-3 text-[0.95rem]",
-          active ? "bg-accent-soft font-medium text-accent-strong" : "text-ink-soft hover:bg-line/60 hover:text-ink",
+          "flex min-h-11 items-center gap-2 rounded-xl py-2 pr-10 pl-3 text-[0.95rem] transition-colors",
+          active ? "bg-accent-soft font-medium text-accent-strong ring-1 ring-accent/25" : "text-ink-soft hover:bg-elevated hover:text-ink",
         )}
       >
         <span className="truncate">{course.title}</span>
-        {course.reviewDueCount > 0 && <span className="ml-auto size-1.5 shrink-0 rounded-full bg-accent" aria-label="Review due" />}
+        {course.reviewDueCount > 0 && <span className="ml-auto shrink-0 font-mono text-[0.7rem] text-spark tabular-nums">{course.reviewDueCount}</span>}
       </Link>
       <div ref={menuRef} className="absolute top-1/2 right-1 -translate-y-1/2">
         <button
@@ -178,11 +180,11 @@ function CourseItem({ course, active, onNavigate }: { course: CourseListItem; ac
           <MoreHorizontal className="size-4" aria-hidden />
         </button>
         {menu && (
-          <div role="menu" className="absolute right-0 z-30 mt-1 w-40 rounded-lg border border-line bg-paper py-1 shadow-lg">
-            <button role="menuitem" autoFocus className="block min-h-10 w-full px-3 text-left text-sm hover:bg-surface" onClick={() => { setMenu(false); setTitle(course.title); setDialog("rename"); }}>
+          <div role="menu" className="absolute right-0 z-30 mt-1 w-40 rounded-xl border border-line-strong bg-surface py-1 shadow-xl">
+            <button role="menuitem" autoFocus className="block min-h-10 w-full px-3 text-left text-sm hover:bg-elevated" onClick={() => { setMenu(false); setTitle(course.title); setDialog("rename"); }}>
               Rename
             </button>
-            <button role="menuitem" className="block min-h-10 w-full px-3 text-left text-sm text-bad hover:bg-surface" onClick={() => { setMenu(false); setDialog("delete"); }}>
+            <button role="menuitem" className="block min-h-10 w-full px-3 text-left text-sm text-bad hover:bg-elevated" onClick={() => { setMenu(false); setDialog("delete"); }}>
               Delete course
             </button>
           </div>
@@ -191,7 +193,7 @@ function CourseItem({ course, active, onNavigate }: { course: CourseListItem; ac
       <Dialog open={dialog === "rename"} onClose={() => setDialog(null)} title="Rename course">
         <form onSubmit={(e) => { e.preventDefault(); rename(); }} className="space-y-4">
           <label htmlFor={`rename-${course.id}`} className="sr-only">Course name</label>
-          <input id={`rename-${course.id}`} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} className="min-h-11 w-full rounded-lg border border-line-strong px-3" autoFocus />
+          <input id={`rename-${course.id}`} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} className="min-h-11 w-full rounded-xl border border-line-strong bg-paper px-3 text-ink focus:border-accent" autoFocus />
           {error && <InlineError message={error} />}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="quiet" onClick={() => setDialog(null)}>Cancel</Button>

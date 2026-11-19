@@ -1,49 +1,126 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --color-ink: #1d1e22;
-  --color-ink-soft: #3d3f45;
-  --color-muted: #646870;
-  --color-line: #e6e6ea;
-  --color-line-strong: #d4d4da;
-  --color-surface: #f8f8f9;
-  --color-paper: #ffffff;
-  --color-accent: #6347d1;
-  --color-accent-strong: #5236bd;
-  --color-accent-soft: #f1eefc;
-  --color-good: #1f7a4d;
-  --color-good-soft: #eaf6ef;
-  --color-warn: #8a5a00;
-  --color-warn-soft: #fdf4e3;
-  --color-bad: #a8332b;
-  --color-bad-soft: #fcecea;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Deep slate / obsidian canvas & structural surfaces (60 / 30) */
+  --color-paper: #0b1120;
+  --color-surface: #111a2e;
+  --color-elevated: #17233b;
+  --color-line: #1f2e4a;
+  --color-line-strong: #2d4063;
+
+  /* Crisp high-legibility dark-mode ink hierarchy */
+  --color-ink: #f1f5f9;
+  --color-ink-soft: #cbd5e1;
+  --color-muted: #8a9bb8;
+
+  /* Primary bioluminescent accent — Spark (electric cyan) */
+  --color-accent: #22d3ee;
+  --color-accent-strong: #67e8f9;
+  --color-accent-ledge: #0891b2;
+  --color-accent-ink: #06131f;
+  --color-accent-soft: #102a3d;
+
+  /* Character-native accents */
+  --color-spark: #22d3ee;
+  --color-spark-soft: #102a3d;
+  --color-link: #f59e0b;
+  --color-link-soft: #2b2112;
+  --color-prism: #c4b5fd;
+  --color-prism-soft: #1f1b38;
+  --color-static: #fb7185;
+  --color-static-soft: #2b1824;
+
+  /* Semantic state tokens */
+  --color-good: #34d399;
+  --color-good-soft: #0f2924;
+  --color-warn: #fbbf24;
+  --color-warn-soft: #2b2112;
+  --color-bad: #fb7185;
+  --color-bad-soft: #2c1622;
+
+  /* Typography */
+  --font-display: var(--font-display), "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-body), "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 html,
 body {
-  background: var(--color-paper);
+  background-color: var(--color-paper);
+  background-image:
+    radial-gradient(60rem 36rem at 75% -8%, rgba(34, 211, 238, 0.065), transparent 60%),
+    radial-gradient(48rem 32rem at 12% 18%, rgba(167, 139, 250, 0.05), transparent 62%);
+  background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-sans);
+  letter-spacing: 0.005em;
+  color-scheme: dark;
   -webkit-font-smoothing: antialiased;
 }
 
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display);
+  text-wrap: balance;
+}
+
 /*
- * Focus styles. Text fields and elements Ada focuses programmatically
- * (headings/regions with tabindex="-1", for screen readers) get no ring:
- * the caret and a subtle neutral border are enough. Interactive controls
- * keep a thin ring for *keyboard* navigation only (:focus-visible doesn't
- * show it on mouse clicks), so keyboard users can see where they are.
+ * Focus styles. Programmatically focused headings/regions get no ring;
+ * keyboard focus on interactive controls gets a crisp bioluminescent outline.
  */
 :focus {
   outline: none;
 }
 :where(a, button, summary, [role="menuitem"], input[type="radio"], input[type="checkbox"]):focus-visible {
-  outline: 1.5px solid var(--color-muted);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: 8px;
+}
+
+/* Tactile Duolingo-inspired press depth translated into obsidian ceramic */
+.btn-tactile-primary {
+  box-shadow: 0 3px 0 0 var(--color-accent-ledge), 0 8px 20px -6px rgba(34, 211, 238, 0.32);
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms cubic-bezier(0.16, 1, 0.3, 1), background-color 150ms ease;
+}
+.btn-tactile-primary:hover:not(:disabled) {
+  background-color: var(--color-accent-strong);
+  box-shadow: 0 4px 0 0 var(--color-accent-ledge), 0 10px 24px -6px rgba(34, 211, 238, 0.42);
+  transform: translateY(-1px);
+}
+.btn-tactile-primary:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 0 var(--color-accent-ledge), 0 2px 8px -2px rgba(34, 211, 238, 0.2);
+}
+
+.btn-tactile-secondary {
+  box-shadow: 0 2px 0 0 #070d1a;
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms cubic-bezier(0.16, 1, 0.3, 1), border-color 150ms ease, background-color 150ms ease;
+}
+.btn-tactile-secondary:hover:not(:disabled) {
+  border-color: #3d5682;
+  background-color: var(--color-elevated);
+}
+.btn-tactile-secondary:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: 0 0 0 0 #070d1a;
+}
+
+.choice-card-tactile {
+  box-shadow: 0 2px 0 0 #070d1a;
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms cubic-bezier(0.16, 1, 0.3, 1), border-color 150ms ease, background-color 150ms ease;
+}
+.choice-card-tactile:hover:not([data-disabled="true"]) {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 0 0 #070d1a;
+}
+.choice-card-tactile:active:not([data-disabled="true"]) {
+  transform: translateY(1.5px);
+  box-shadow: 0 0 0 0 #070d1a;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -68,9 +145,11 @@ body {
 .ada-prose h1,
 .ada-prose h2,
 .ada-prose h3 {
+  font-family: var(--font-display);
   font-weight: 600;
   line-height: 1.35;
   margin-top: 1.4em;
+  color: var(--color-ink);
 }
 .ada-prose h1 {
   font-size: 1.35rem;
@@ -94,35 +173,40 @@ body {
 }
 .ada-prose strong {
   font-weight: 600;
+  color: #ffffff;
 }
 .ada-prose em {
   color: var(--color-ink-soft);
 }
 .ada-prose code {
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.88em;
   background: var(--color-surface);
   border: 1px solid var(--color-line);
-  border-radius: 4px;
-  padding: 0.05em 0.3em;
+  border-radius: 5px;
+  padding: 0.08em 0.35em;
+  color: var(--color-accent-strong);
 }
 .ada-prose pre {
-  background: var(--color-surface);
+  background: #080e1c;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
-  padding: 0.9em 1em;
+  border-radius: 10px;
+  padding: 0.95em 1.1em;
   overflow-x: auto;
   font-size: 0.9rem;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 .ada-prose pre code {
   border: 0;
   background: transparent;
   padding: 0;
+  color: var(--color-ink-soft);
 }
 .ada-prose blockquote {
-  border-left: 3px solid var(--color-line-strong);
-  padding-left: 1em;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  border-radius: 10px;
+  padding: 0.75em 1em;
   color: var(--color-ink-soft);
 }
 .ada-prose table {
@@ -133,8 +217,12 @@ body {
 .ada-prose th,
 .ada-prose td {
   border: 1px solid var(--color-line);
-  padding: 0.35em 0.7em;
+  padding: 0.4em 0.75em;
   text-align: left;
+}
+.ada-prose th {
+  background: var(--color-surface);
+  font-weight: 600;
 }
 .ada-prose a {
   color: var(--color-accent-strong);
@@ -148,49 +236,52 @@ body {
 .ada-prose .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.25em 0;
+  padding: 0.35em 0;
 }
-/* Restrained light-mode syntax highlighting for fenced code blocks */
+.ada-prose .katex {
+  color: var(--color-ink);
+}
+
+/* Dark obsidian syntax highlighting for fenced code blocks */
 .ada-prose .hljs-comment,
 .ada-prose .hljs-quote {
-  color: #6b7280;
+  color: #64748b;
   font-style: italic;
 }
 .ada-prose .hljs-keyword,
 .ada-prose .hljs-selector-tag,
 .ada-prose .hljs-subst {
-  color: #5b3ec8;
+  color: #c4b5fd;
   font-weight: 500;
 }
 .ada-prose .hljs-string,
 .ada-prose .hljs-doctag,
 .ada-prose .hljs-regexp {
-  color: #1f7a4d;
+  color: #34d399;
 }
 .ada-prose .hljs-number,
 .ada-prose .hljs-literal,
 .ada-prose .hljs-variable,
 .ada-prose .hljs-template-variable {
-  color: #8a5a00;
+  color: #fbbf24;
 }
 .ada-prose .hljs-title,
 .ada-prose .hljs-section,
 .ada-prose .hljs-selector-id,
 .ada-prose .hljs-type,
 .ada-prose .hljs-built_in {
-  color: #1d4ed8;
+  color: #38bdf8;
 }
 .ada-prose .hljs-attr,
 .ada-prose .hljs-attribute,
 .ada-prose .hljs-name {
-  color: #9a3412;
+  color: #fda4af;
 }
 .ada-prose .hljs-deletion {
-  color: #a8332b;
-  background: #fcecea;
+  color: #fb7185;
+  background: rgba(251, 113, 133, 0.14);
 }
 .ada-prose .hljs-addition {
-  color: #1f7a4d;
-  background: #eaf6ef;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.14);
 }
-

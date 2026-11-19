@@ -8,17 +8,27 @@ const LABEL: Record<DisplayStatusDTO, string> = {
   review_due: "Review due",
 };
 
+const GLYPH: Record<DisplayStatusDTO, string> = {
+  not_assessed: "○",
+  developing: "◐",
+  demonstrated: "◆",
+  review_due: "↻",
+};
+
 export function StatusBadge({ status }: { status: DisplayStatusDTO }) {
   return (
     <span
       className={clsx(
-        "inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs",
-        status === "not_assessed" && "bg-surface text-muted",
-        status === "developing" && "bg-warn-soft text-warn",
-        status === "demonstrated" && "bg-good-soft text-good",
-        status === "review_due" && "bg-accent-soft text-accent-strong",
+        "inline-flex shrink-0 items-center gap-1.5 text-xs font-medium whitespace-nowrap",
+        status === "not_assessed" && "text-muted",
+        status === "developing" && "text-link",
+        status === "demonstrated" && "text-good",
+        status === "review_due" && "text-spark",
       )}
     >
+      <span aria-hidden className="text-[0.7rem] leading-none">
+        {GLYPH[status]}
+      </span>
       {LABEL[status]}
     </span>
   );

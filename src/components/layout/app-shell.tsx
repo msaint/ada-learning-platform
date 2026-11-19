@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { CourseListItem } from "@/lib/schemas/dto";
 import { DevModelBanner } from "@/components/ui/primitives";
+import { AdaMark } from "@/components/characters/glyphs";
 import { CourseSidebar } from "./course-sidebar";
 import { AccountRequiredDialog, GuestBanner } from "@/components/auth/guest";
 
@@ -43,8 +44,8 @@ export function AppShell({
         {/* mobile drawer */}
         {drawerOpen && (
           <div className="fixed inset-0 z-40 md:hidden">
-            <button aria-label="Close menu" className="absolute inset-0 bg-black/25" onClick={() => setDrawerOpen(false)} />
-            <aside id="mobile-drawer" aria-label="Courses" className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-line bg-surface shadow-xl">
+            <button aria-label="Close menu" className="absolute inset-0 bg-black/65" onClick={() => setDrawerOpen(false)} />
+            <aside id="mobile-drawer" aria-label="Courses" className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-line bg-surface shadow-2xl">
               <CourseSidebar courses={courses} user={user} onNavigate={() => setDrawerOpen(false)} autoFocus />
             </aside>
           </div>
@@ -52,17 +53,18 @@ export function AppShell({
         <div className="flex min-w-0 flex-1 flex-col">
           {devModel && <DevModelBanner />}
           {user?.isGuest && <GuestBanner />}
-          <header className="flex h-14 items-center gap-2 border-b border-line px-3 md:hidden">
+          <header className="flex h-14 items-center gap-2 border-b border-line bg-paper/90 px-3 md:hidden">
             <button
               aria-label="Open menu"
               aria-expanded={drawerOpen}
               aria-controls="mobile-drawer"
               onClick={() => setDrawerOpen(true)}
-              className="inline-flex size-11 items-center justify-center rounded-lg text-ink hover:bg-surface"
+              className="inline-flex size-11 items-center justify-center rounded-xl text-ink hover:bg-surface"
             >
               <Menu className="size-5" aria-hidden />
             </button>
-            <span className="font-semibold tracking-tight">Ada</span>
+            <AdaMark size={20} />
+            <span className="font-display font-semibold tracking-tight text-ink">Ada</span>
           </header>
           <main id="main" className="min-w-0 flex-1">
             {children}

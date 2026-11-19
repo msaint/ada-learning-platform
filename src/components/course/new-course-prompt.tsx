@@ -45,7 +45,7 @@ export function NewCoursePrompt({ needsSession = false, guestAtLimit = false }: 
         submit();
       }}
     >
-      <div className="relative rounded-2xl border border-line-strong bg-paper shadow-sm focus-within:border-muted">
+      <div className="relative rounded-2xl border border-line-strong bg-surface shadow-lg shadow-black/20 transition-colors focus-within:border-accent/70">
         <label htmlFor="topic" className="sr-only">
           What would you like to learn?
         </label>
@@ -67,24 +67,24 @@ export function NewCoursePrompt({ needsSession = false, guestAtLimit = false }: 
           placeholder="Black holes, chess openings, why train wheels are tapered…"
           aria-invalid={over || undefined}
           aria-describedby="topic-help"
-          className="block max-h-48 min-h-16 w-full resize-none rounded-2xl bg-transparent px-5 py-4 pr-16 text-[1.05rem] leading-relaxed text-ink placeholder:text-muted/70 focus:outline-none"
+          className="block max-h-48 min-h-16 w-full resize-none rounded-2xl bg-transparent px-5 py-4 pr-16 text-[1.05rem] leading-relaxed text-ink placeholder:text-muted/75 focus:outline-none"
         />
         <button
           type="submit"
           aria-label="Start"
           disabled={!topic.trim() || over || busy}
-          className="absolute right-3 bottom-3 inline-flex size-11 items-center justify-center rounded-xl bg-accent text-white transition-opacity hover:bg-accent-strong disabled:opacity-30"
+          className="btn-tactile-primary absolute right-3 bottom-3 inline-flex size-11 items-center justify-center rounded-xl bg-accent font-semibold text-accent-ink hover:bg-accent-strong disabled:opacity-35"
         >
-          <ArrowUp className="size-5" aria-hidden />
+          <ArrowUp className="size-5 stroke-[2.25]" aria-hidden />
         </button>
       </div>
-      <p id="topic-help" className={`mt-2 min-h-5 text-center text-xs ${over ? "text-bad" : "text-muted"}`} aria-live="polite">
-        {busy ? "Ada is thinking about your topic…" : over ? `Keep it under ${MAX} characters (${topic.length}).` : "Any topic. Ada builds the course."}
+      <p id="topic-help" className={`mt-2.5 min-h-5 text-center text-xs ${over ? "text-bad" : "text-muted"}`} aria-live="polite">
+        {busy ? "Ada is mapping your starting path…" : over ? `Keep it under ${MAX} characters (${topic.length}).` : "Any topic. Ada builds an adaptive course around it."}
       </p>
       {guestAtLimit && (
         <p className="mt-1 text-center text-sm text-ink-soft">
           Guests can try one course.{" "}
-          <Link href="/login?mode=signup&next=/app" className="font-medium text-accent-strong underline underline-offset-2">
+          <Link href="/login?mode=signup&next=/app" className="font-medium text-accent underline underline-offset-2 hover:text-accent-strong">
             Create a free account
           </Link>{" "}
           to start another and keep your progress.
