@@ -30,23 +30,29 @@ export function AccountRequiredDialog() {
   const pathname = usePathname();
   const [message, setMessage] = useState<string | null>(null);
   useEffect(() => {
-    const onEvent = (e: Event) => setMessage((e as CustomEvent<string>).detail || "Create a free account to continue.");
+    const onEvent = (e: Event) =>
+      setMessage(
+        (e as CustomEvent<string>).detail ||
+          "Guest sessions are limited to one course at a time and a daily activity budget. Create a free account to continue.",
+      );
     window.addEventListener(ACCOUNT_REQUIRED_EVENT, onEvent);
     return () => window.removeEventListener(ACCOUNT_REQUIRED_EVENT, onEvent);
   }, []);
   return (
-    <Dialog open={message !== null} onClose={() => setMessage(null)} title="Save your progress with an account">
+    <Dialog open={message !== null} onClose={() => setMessage(null)} title="Guest limit reached">
       <p className="mb-2 text-sm leading-relaxed text-ink-soft">{message}</p>
-      <p className="mb-5 text-sm leading-relaxed text-ink-soft">It&apos;s free. Everything you&apos;ve done as a guest moves into your account.</p>
+      <p className="mb-5 text-sm leading-relaxed text-ink-soft">
+        Creating a free account keeps your existing guest course and lifts the guest limits, or you can manage or scrap your current course from the sidebar.
+      </p>
       <div className="flex flex-wrap justify-end gap-2">
         <button onClick={() => setMessage(null)} className="min-h-11 rounded-lg px-4 text-[0.95rem] text-muted hover:bg-surface hover:text-ink">
-          Not now
+          Close
         </button>
-        <Link href={authHref("signin", pathname)} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong px-4 text-[0.95rem] font-medium hover:bg-surface">
+        <Link href={authHref("signin", pathname)} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong px-4 text-[0.95rem] font-medium text-ink hover:bg-surface">
           Sign in
         </Link>
         <Link href={authHref("signup", pathname)} className="btn-tactile-primary inline-flex min-h-11 items-center rounded-xl bg-accent px-4 text-[0.95rem] font-semibold text-accent-ink">
-          Create account
+          Create free account
         </Link>
       </div>
     </Dialog>

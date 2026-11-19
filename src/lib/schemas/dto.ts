@@ -17,6 +17,14 @@ export type CourseListItem = {
   hasOpenSession: boolean;
 };
 
+export type DraftListItem = {
+  id: string;
+  topic: string;
+  title: string | null;
+  state: "collecting" | "ready";
+  updatedAt: string;
+};
+
 export type DraftTurn = { role: "ada" | "learner"; text: string };
 
 export type CourseDraftView = {

@@ -21,16 +21,15 @@ test("a first-time visitor creates and starts a course with no account, then sig
   await page.getByRole("button", { name: "Check answer" }).click();
   await expect(page.getByRole("region", { name: "Feedback" })).toBeVisible();
 
-  // A second course needs an account.
+  // Returning to /app shows the existing course in the sidebar and replaces the prompt with continue/scrap/sign-up options.
   await page.goto("/app");
-  await expect(page.getByText("Guests can try one course.")).toBeVisible();
-  await page.getByLabel("What would you like to learn?").fill("Chess");
-  await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Save your progress with an account" });
-  await expect(dialog).toBeVisible();
+  await expect(sidebarCourses(page)).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "What would you like to learn?" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Continue your course, or start fresh" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Scrap it and create a new one" })).toBeVisible();
 
-  // Sign up from the dialog; the guest course comes along.
-  await dialog.getByRole("link", { name: "Create account" }).click();
+  // Sign up from the guest gate; the guest course comes along.
+  await page.getByRole("main").getByRole("link", { name: "Create a free account" }).click();
   await page.waitForURL(/\/login\?mode=signup/);
   await expect(page.getByRole("heading", { name: "Save your progress" })).toBeVisible();
   await page.getByLabel("Email").fill(`guest-${Date.now()}@example.test`);

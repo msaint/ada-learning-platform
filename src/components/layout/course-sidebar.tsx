@@ -5,7 +5,7 @@ import { LogOut, MoreHorizontal, Plus, RotateCcw, Settings } from "lucide-react"
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { CourseListItem } from "@/lib/schemas/dto";
+import type { CourseListItem, DraftListItem } from "@/lib/schemas/dto";
 import { api, ApiError } from "@/lib/client/api";
 import { Button, Dialog, InlineError } from "@/components/ui/primitives";
 import { AdaMark } from "@/components/characters/glyphs";
@@ -13,11 +13,13 @@ import type { ShellUser } from "./app-shell";
 
 export function CourseSidebar({
   courses,
+  drafts = [],
   user,
   onNavigate,
   autoFocus,
 }: {
   courses: CourseListItem[];
+  drafts?: DraftListItem[];
   user: ShellUser;
   onNavigate?: () => void;
   autoFocus?: boolean;
@@ -49,10 +51,13 @@ export function CourseSidebar({
       </div>
       <div className="mx-4 my-3 border-t border-line" />
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        {courses.length === 0 ? (
+        {courses.length === 0 && drafts.length === 0 ? (
           <p className="px-3 py-2 text-sm text-muted">Your courses will appear here</p>
         ) : (
           <ul className="space-y-0.5" aria-label="Your courses">
+            {drafts.map((d) => (
+              <DraftItem key={d.id} draft={d} active={pathname === "/app/new"} onNavigate={onNavigate} />
+            ))}
             {courses.map((c) => (
               <CourseItem key={c.id} course={c} active={pathname?.startsWith(`/app/courses/${c.id}`) ?? false} onNavigate={onNavigate} />
             ))}
@@ -211,6 +216,75 @@ function CourseItem({ course, active, onNavigate }: { course: CourseListItem; ac
           <Button variant="danger" busy={busy} onClick={remove}>Delete course</Button>
         </div>
       </Dialog>
+    </li>
+  );
+}
+
+function DraftItem({ draft, active, onNavigate }: { draft: DraftListItem; active: boolean; onNavigate?: () => void }) {
+  const router = useRouter();
+  const [menu, setMenu] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const label = draft.title || draft.topic;
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !menuRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [menu]);
+
+  async function scrap() {
+    setBusy(true);
+    try {
+      await api(`/course-drafts/${draft.id}`, { method: "DELETE" });
+      setMenu(false);
+      if (active) router.push("/app");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li className="group relative">
+      <Link
+        href={`/app/new?draft=${draft.id}`}
+        onClick={onNavigate}
+        aria-current={active ? "page" : undefined}
+        title={`Finish setting up: ${label}`}
+        className={clsx(
+          "flex min-h-11 items-center gap-2 rounded-xl py-2 pr-10 pl-3 text-[0.95rem] transition-colors",
+          active ? "bg-accent-soft font-medium text-accent-strong ring-1 ring-accent/25" : "text-ink-soft hover:bg-elevated hover:text-ink",
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="shrink-0 text-[0.7rem] font-medium text-link">Setup</span>
+      </Link>
+      <div ref={menuRef} className="absolute top-1/2 right-1 -translate-y-1/2">
+        <button
+          aria-label={`Options for ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={menu}
+          onClick={() => setMenu((m) => !m)}
+          className="inline-flex size-9 items-center justify-center rounded-md text-muted opacity-100 hover:bg-line md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+        >
+          <MoreHorizontal className="size-4" aria-hidden />
+        </button>
+        {menu && (
+          <div role="menu" className="absolute right-0 z-30 mt-1 w-40 rounded-xl border border-line-strong bg-surface py-1 shadow-xl">
+            <button role="menuitem" autoFocus disabled={busy} className="block min-h-10 w-full px-3 text-left text-sm text-bad hover:bg-elevated disabled:opacity-50" onClick={scrap}>
+              {busy ? "Scrapping…" : "Scrap draft"}
+            </button>
+          </div>
+        )}
+      </div>
     </li>
   );
 }

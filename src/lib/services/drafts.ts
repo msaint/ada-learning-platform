@@ -4,7 +4,7 @@ import { AppError, conflict, notFound } from "@/lib/errors";
 import { callModel } from "@/lib/ai";
 import { usingMockModel } from "@/lib/env";
 import type { FetchedSource, ModelInfo } from "@/lib/ai/model-adapter";
-import type { CourseDraftView, DraftTurn, InlineError } from "@/lib/schemas/dto";
+import type { CourseDraftView, DraftListItem, DraftTurn, InlineError } from "@/lib/schemas/dto";
 import type { CurriculumProposal, DraftField, Interpretation } from "@/lib/schemas/model";
 import { validateCurriculum } from "@/lib/learning/curriculum";
 import { track } from "./telemetry";
@@ -248,9 +248,9 @@ export async function assertGuestMayCreateCourse(t: Db, ownerId: string, lock = 
     ? await t<{ is_guest: boolean }[]>`select is_guest from users where id = ${ownerId} for update`
     : await t<{ is_guest: boolean }[]>`select is_guest from users where id = ${ownerId}`;
   if (!u?.is_guest) return;
-  const [{ n }] = await t<{ n: number }[]>`select count(*)::int as n from courses where owner_id = ${ownerId}`;
+  const [{ n }] = await t<{ n: number }[]>`select count(*)::int as n from courses where owner_id = ${ownerId} and status <> 'archived'`;
   if (n >= GUEST_COURSE_LIMIT) {
-    throw new AppError("account_required", "Create a free account to make another course. Your current course comes with you.");
+    throw new AppError("account_required", "Guest sessions can hold one course at a time. Continue or scrap your current course, or create a free account to add more.");
   }
 }
 
@@ -412,6 +412,28 @@ export async function insertConcepts(
     }
   }
   return ids;
+}
+
+/** Open (unconverted) drafts within the last 14 days so unfinished setups are always visible and resumable. */
+export async function listOpenDrafts(ownerId: string): Promise<DraftListItem[]> {
+  const rows = await db()<{ id: string; topic: string; status: "collecting" | "ready"; proposal_json: DraftProposal | null; updated_at: Date }[]>`
+    select id, topic, status, proposal_json, updated_at from course_drafts
+    where owner_id = ${ownerId} and status <> 'converted' and updated_at > now() - interval '14 days'
+    order by updated_at desc limit 20`;
+  return rows.map((r) => ({
+    id: r.id,
+    topic: r.topic,
+    title: r.proposal_json?.curriculum?.title ?? null,
+    state: r.status,
+    updatedAt: r.updated_at.toISOString(),
+  }));
+}
+
+/** Discards an unfinished draft owned by the user. */
+export async function deleteDraft(ownerId: string, draftId: string) {
+  const deleted = await db()<{ id: string }[]>`
+    delete from course_drafts where id = ${draftId} and owner_id = ${ownerId} and status <> 'converted' returning id`;
+  if (!deleted.length) throw notFound("Course draft");
 }
 
 /** Most recent unfinished draft (for "continue setting up" on the home screen). */

@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowUp } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { api, ApiError, ensureSession, newKey } from "@/lib/client/api";
@@ -10,7 +9,7 @@ import type { CourseDraftView } from "@/lib/schemas/dto";
 
 const MAX = 500;
 
-export function NewCoursePrompt({ needsSession = false, guestAtLimit = false }: { needsSession?: boolean; guestAtLimit?: boolean }) {
+export function NewCoursePrompt({ needsSession = false }: { needsSession?: boolean }) {
   const router = useRouter();
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,8 +27,8 @@ export function NewCoursePrompt({ needsSession = false, guestAtLimit = false }: 
       if (needsSession) await ensureSession();
       const { draft } = await api<{ draft: CourseDraftView }>("/course-drafts", { body: { topic: t, idempotencyKey: keyRef.current } });
       router.push(`/app/new?draft=${draft.id}`);
-      // A new guest session changes what the (persistent) shell should show.
-      if (needsSession) router.refresh();
+      // Refresh the persistent shell so the new draft appears in the sidebar immediately.
+      router.refresh();
     } catch (e) {
       // account_required opens the account dialog (via the API client); don't also show an error.
       if (!(e instanceof ApiError && e.code === "account_required")) setError(e instanceof ApiError ? e.message : "Something went wrong.");
@@ -81,15 +80,6 @@ export function NewCoursePrompt({ needsSession = false, guestAtLimit = false }: 
       <p id="topic-help" className={`mt-2.5 min-h-5 text-center text-xs ${over ? "text-bad" : "text-muted"}`} aria-live="polite">
         {busy ? "Ada is mapping your starting path…" : over ? `Keep it under ${MAX} characters (${topic.length}).` : "Any topic. Ada builds an adaptive course around it."}
       </p>
-      {guestAtLimit && (
-        <p className="mt-1 text-center text-sm text-ink-soft">
-          Guests can try one course.{" "}
-          <Link href="/login?mode=signup&next=/app" className="font-medium text-accent underline underline-offset-2 hover:text-accent-strong">
-            Create a free account
-          </Link>{" "}
-          to start another and keep your progress.
-        </p>
-      )}
       {error && <InlineError message={error} onRetry={submit} />}
     </form>
   );

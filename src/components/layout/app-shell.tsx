@@ -3,7 +3,7 @@
 import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { CourseListItem } from "@/lib/schemas/dto";
+import type { CourseListItem, DraftListItem } from "@/lib/schemas/dto";
 import { DevModelBanner } from "@/components/ui/primitives";
 import { AdaMark } from "@/components/characters/glyphs";
 import { CourseSidebar } from "./course-sidebar";
@@ -13,11 +13,13 @@ export type ShellUser = { email: string | null; displayName: string | null; isGu
 
 export function AppShell({
   courses,
+  drafts = [],
   user,
   devModel,
   children,
 }: {
   courses: CourseListItem[];
+  drafts?: DraftListItem[];
   user: ShellUser;
   devModel: boolean;
   children: React.ReactNode;
@@ -39,14 +41,14 @@ export function AppShell({
       <div className="flex min-h-0 flex-1">
         {/* desktop sidebar */}
         <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 border-r border-line bg-surface md:block">
-          <CourseSidebar courses={courses} user={user} />
+          <CourseSidebar courses={courses} drafts={drafts} user={user} />
         </aside>
         {/* mobile drawer */}
         {drawerOpen && (
           <div className="fixed inset-0 z-40 md:hidden">
             <button aria-label="Close menu" className="absolute inset-0 bg-black/65" onClick={() => setDrawerOpen(false)} />
             <aside id="mobile-drawer" aria-label="Courses" className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-line bg-surface shadow-2xl">
-              <CourseSidebar courses={courses} user={user} onNavigate={() => setDrawerOpen(false)} autoFocus />
+              <CourseSidebar courses={courses} drafts={drafts} user={user} onNavigate={() => setDrawerOpen(false)} autoFocus />
             </aside>
           </div>
         )}
