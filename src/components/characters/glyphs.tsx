@@ -1,8 +1,10 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { useId } from "react";
-import type { CharacterId, CharacterMood } from "./state-machine";
+import { useId, useState } from "react";
+
+export type CharacterId = "spark" | "link" | "prism" | "static";
+export type CharacterMood = "idle" | "excited" | "thinking" | "guiding" | "soothing" | "celebrating" | "merging";
 
 interface GlyphProps {
   mood?: CharacterMood;
@@ -337,5 +339,33 @@ export function AdaMark({ size = 24 }: { size?: number }) {
       <polygon points="14,3 4,14 14,15" fill="#c4b5fd" fillOpacity="0.45" />
       <circle cx="14" cy="14" r="2.4" fill="#f8fafc" />
     </svg>
+  );
+}
+
+/**
+ * Purely decorative ambient row of Ada's four geometric light-forms
+ * (Spark, Link, Prism, Static) with gentle cursor parallax and no text/controls.
+ */
+export function AmbientGlyphRow() {
+  const [pointer, setPointer] = useState({ x: 0, y: 0 });
+
+  return (
+    <div
+      aria-hidden="true"
+      onPointerMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        setPointer({
+          x: Math.max(-1, Math.min(1, ((e.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1)),
+          y: Math.max(-1, Math.min(1, ((e.clientY - rect.top) / Math.max(rect.height, 1)) * 2 - 1)),
+        });
+      }}
+      onPointerLeave={() => setPointer({ x: 0, y: 0 })}
+      className="mb-5 flex items-center justify-center gap-5 select-none sm:gap-7"
+    >
+      <SparkGlyph size={44} mood="idle" pointer={pointer} className="opacity-90" />
+      <LinkGlyph size={42} mood="idle" pointer={pointer} className="opacity-85" />
+      <PrismGlyph size={46} mood="idle" pointer={pointer} className="opacity-95" />
+      <StaticGlyph size={42} mood="soothing" pointer={pointer} className="opacity-75" />
+    </div>
   );
 }

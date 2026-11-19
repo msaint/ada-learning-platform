@@ -85,7 +85,7 @@ export function ActivityView(props: {
 
       {props.hints.length > 0 && (
         <div className="mt-5 rounded-2xl border border-link/30 bg-link-soft px-5 py-3.5" aria-live="polite">
-          <p className="mb-1.5 text-xs font-semibold text-link">{props.hints.length === 1 ? "Link's hint" : "Link's hints"}</p>
+          <p className="mb-1.5 text-xs font-semibold text-link">{props.hints.length === 1 ? "Hint" : "Hints"}</p>
           <ol className="space-y-1.5">
             {props.hints.map((h, i) => (
               <li key={i}>

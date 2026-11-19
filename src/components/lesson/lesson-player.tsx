@@ -7,8 +7,6 @@ import { api, ApiError, newKey } from "@/lib/client/api";
 import type { NextAction, SessionView, InlineError as InlineErrorT } from "@/lib/schemas/dto";
 import { Button, InlineError, Spinner } from "@/components/ui/primitives";
 import { ExploreBranchButton } from "@/components/course/explore-branch-button";
-import { CharacterCompanion } from "@/components/characters/character-companion";
-import { HESITATION_THRESHOLD_MS, resolveCharacterPresence, type CharacterPresence } from "@/components/characters/state-machine";
 import { ActivityView } from "./activity-renderer";
 import { FeedbackPanel } from "./feedback";
 
@@ -38,14 +36,7 @@ export function LessonPlayer({
   const [choice, setChoice] = useState<string | undefined>(initialSession?.draft?.value.choiceId);
   const [text, setText] = useState<string>(initialSession?.draft?.value.text ?? "");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "conflict">("idle");
-
-  // Adaptive Synapse & Spark UX state
   const [streak, setStreak] = useState(0);
-  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
-  const [recoveredFromStruggle, setRecoveredFromStruggle] = useState(false);
-  const [hesitating, setHesitating] = useState(false);
-  const [inputTick, setInputTick] = useState(0);
-  const hadStruggleRef = useRef(false);
   const lastGradedActivityIdRef = useRef<string | null>(null);
 
   const draftVersion = useRef(initialSession?.draft?.version ?? 0);
@@ -69,42 +60,14 @@ export function LessonPlayer({
       attemptKey.current = newKey();
       assistKey.current = newKey();
       setSaveState("idle");
-      setHesitating(false);
-      setRecoveredFromStruggle(false);
-      setInputTick((t) => t + 1);
     }
-    // Update streak / struggle counters exactly once per graded activity
     if (s.phase === "feedback" && s.feedback?.status === "graded" && s.activity?.id && lastGradedActivityIdRef.current !== s.activity.id) {
       lastGradedActivityIdRef.current = s.activity.id;
-      setHesitating(false);
-      if (s.feedback.result === "correct" && !s.feedback.skipped) {
-        setStreak((prev) => prev + 1);
-        setConsecutiveErrors(0);
-        if (hadStruggleRef.current) {
-          setRecoveredFromStruggle(true);
-          hadStruggleRef.current = false;
-        } else {
-          setRecoveredFromStruggle(false);
-        }
-      } else if (s.feedback.result === "incorrect" || s.feedback.result === "partial" || s.feedback.skipped) {
-        setStreak(0);
-        setConsecutiveErrors((prev) => prev + 1);
-        setRecoveredFromStruggle(false);
-        hadStruggleRef.current = true;
-      }
+      if (s.feedback.result === "correct" && !s.feedback.skipped) setStreak((prev) => prev + 1);
+      else if (s.feedback.result === "incorrect" || s.feedback.result === "partial" || s.feedback.skipped) setStreak(0);
     }
     if (s.error) setError({ message: s.error.message, retry: s.error.retryable ? undefined : undefined });
   }, []);
-
-  // Trigger 2b: User Hesitation (>15s idle while awaiting an assessable response) -> Static drifts in softly
-  useEffect(() => {
-    if (sessionStatus !== "active" || sessionPhase !== "awaiting_response" || !activityId) return;
-    const timer = setTimeout(() => {
-      setHesitating(true);
-      hadStruggleRef.current = true;
-    }, HESITATION_THRESHOLD_MS);
-    return () => clearTimeout(timer);
-  }, [sessionStatus, sessionPhase, activityId, inputTick]);
 
   // Move focus to the new activity/feedback so keyboard and screen-reader users follow transitions.
   // After feedback, focus goes to Continue (the feedback region itself is announced via aria-live).
@@ -139,10 +102,6 @@ export function LessonPlayer({
   const start = useCallback(
     (body: { kind?: SessionView["kind"]; focusConceptId?: string } = {}) => {
       setStreak(0);
-      setConsecutiveErrors(0);
-      setRecoveredFromStruggle(false);
-      setHesitating(false);
-      hadStruggleRef.current = false;
       lastGradedActivityIdRef.current = null;
       return call("start", async () => (await api<{ session: View }>(`/courses/${courseId}/sessions`, { body })).session, { resetInput: true, retry: () => start(body) }).then(() => router.refresh());
     },
@@ -197,8 +156,6 @@ export function LessonPlayer({
       if (idx >= 0 && idx < choices.length) {
         const picked = choices[idx];
         setChoice(picked.id);
-        setHesitating(false);
-        setInputTick((t) => t + 1);
         saveDraft({ choiceId: picked.id });
       }
     }
@@ -232,8 +189,6 @@ export function LessonPlayer({
     const key = assistKey.current;
     setBusy(kind);
     setError(null);
-    setHesitating(false);
-    setInputTick((t) => t + 1);
     try {
       const r = await api<{ hints?: string[]; altExplanations?: string[] }>(`/activities/${session.activity.id}/${kind}`, { body: { idempotencyKey: key } });
       assistKey.current = newKey();
@@ -303,48 +258,8 @@ export function LessonPlayer({
     const RESULT_MARK: Record<string, string> = { correct: "✓", partial: "~", incorrect: "✗", unknown: "–" };
     const RESULT_SR: Record<string, string> = { correct: "knew it", partial: "partly", incorrect: "not yet", unknown: "skipped" };
 
-    const idlePresence: CharacterPresence = session
-      ? resolveCharacterPresence({
-          status: "completed",
-          kind: session.kind,
-          phase: session.phase,
-          position: session.position,
-          difficultyOffset: session.difficultyOffset,
-          activity: session.activity,
-          feedback: session.feedback,
-          summary: session.summary,
-          hintsCount: session.hints.length,
-          altExplanationsCount: session.altExplanations.length,
-          suggestBreakdown: !!session.suggestBreakdown,
-          streak,
-          consecutiveErrors,
-          recoveredFromStruggle,
-          hesitating: false,
-        })
-      : nextAction.kind === "assessment"
-        ? {
-            character: "prism",
-            mood: "idle",
-            trigger: "checkpoint_passed",
-            line: "Every piece is on the board. Ready to test the whole structure?",
-          }
-        : nextAction.kind === "review"
-          ? {
-              character: "link",
-              mood: "guiding",
-              trigger: "hint_or_bridge",
-              line: "Quick memory tune-up—pulling older threads back into focus.",
-            }
-          : {
-              character: "spark",
-              mood: "excited",
-              trigger: "cold_start",
-              line: "Blank canvas. Let's test your first instinct and see what sticks.",
-            };
-
     return (
-      <section aria-labelledby="learn-start" className="py-4">
-        <CharacterCompanion presence={idlePresence} compact className="mb-6" />
+      <section aria-labelledby="learn-start" className="py-6">
         <div ref={focusRef} tabIndex={-1} className="focus:outline-none">
           {s?.placement ? (
             <>
@@ -463,26 +378,8 @@ export function LessonPlayer({
   }
 
   if (session.status === "paused") {
-    const pausedPresence = resolveCharacterPresence({
-      status: "paused",
-      kind: session.kind,
-      phase: session.phase,
-      position: session.position,
-      difficultyOffset: session.difficultyOffset,
-      activity: session.activity,
-      feedback: session.feedback,
-      summary: session.summary,
-      hintsCount: session.hints.length,
-      altExplanationsCount: session.altExplanations.length,
-      suggestBreakdown: !!session.suggestBreakdown,
-      streak,
-      consecutiveErrors,
-      recoveredFromStruggle,
-      hesitating: false,
-    });
     return (
-      <section className="py-4">
-        <CharacterCompanion presence={pausedPresence} compact className="mb-6" />
+      <section className="py-6">
         <div ref={focusRef} tabIndex={-1} className="focus:outline-none">
           <h2 className="mb-2 text-xl font-semibold text-ink">Paused</h2>
           <p className="mb-6 text-ink-soft">Your place and any unsent answer are saved.</p>
@@ -501,29 +398,6 @@ export function LessonPlayer({
   const assessable = a && (a.kind === "multiple_choice" || a.kind === "free_response");
   const measuring = session.kind === "placement" || session.kind === "assessment";
 
-  const presence = resolveCharacterPresence({
-    status: session.status,
-    kind: session.kind,
-    phase,
-    position: session.position,
-    difficultyOffset: session.difficultyOffset,
-    activity: a,
-    feedback: session.feedback,
-    summary: session.summary,
-    hintsCount: session.hints.length,
-    altExplanationsCount: session.altExplanations.length,
-    suggestBreakdown: !!session.suggestBreakdown,
-    streak,
-    consecutiveErrors,
-    recoveredFromStruggle,
-    hesitating: hesitating && !!assessable,
-  });
-
-  const canQuickHint = presence.character === "static" && !!assessable && !measuring && phase === "awaiting_response" && session.hints.length < 3;
-  const companionAction = canQuickHint
-    ? { label: "Quick hint", onClick: () => assist("hint"), busy: busy === "hint" }
-    : null;
-
   // Smooth momentum progress bar (typically 6–8 steps per adaptive session)
   const stepNum = Math.max(1, session.position || 1);
   const progressPct = Math.min(96, Math.round((stepNum / 7) * 100));
@@ -531,7 +405,7 @@ export function LessonPlayer({
   return (
     <section aria-label={KIND_LABEL[session.kind]} className="py-2">
       {/* Session Momentum Header */}
-      <div className="mb-5">
+      <div className="mb-6">
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted">
           <span className="min-w-0 truncate">
             {KIND_LABEL[session.kind]} · step {stepNum}
@@ -556,9 +430,6 @@ export function LessonPlayer({
         </div>
       </div>
 
-      {/* Synapse & Spark Adaptive Companion */}
-      <CharacterCompanion presence={presence} action={companionAction} compact className="mb-6" />
-
       {!a || phase === "choosing_next" ? (
         <div ref={focusRef} tabIndex={-1} className="space-y-4 py-6 focus:outline-none">
           {busy === "next" ? <Spinner label="Preparing the next activity…" /> : !error && <Button variant="primary" onClick={next}>Continue</Button>}
@@ -571,15 +442,11 @@ export function LessonPlayer({
               choice={answered ? session.feedback?.chosenChoiceId ?? choice : choice}
               onChoice={(id) => {
                 setChoice(id);
-                setHesitating(false);
-                setInputTick((t) => t + 1);
                 saveDraft({ choiceId: id });
               }}
               text={answered ? session.feedback?.submittedText ?? text : text}
               onText={(v) => {
                 setText(v);
-                setHesitating(false);
-                setInputTick((t) => t + 1);
                 saveDraft({ text: v });
               }}
               onSubmitShortcut={() => submit()}

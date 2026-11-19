@@ -4,8 +4,7 @@ import { getPageUser } from "@/lib/auth/server";
 import { listCourses } from "@/lib/services/courses";
 import { GUEST_COURSE_LIMIT, latestOpenDraft } from "@/lib/services/drafts";
 import { NewCoursePrompt } from "@/components/course/new-course-prompt";
-import { SparkGlyph } from "@/components/characters/glyphs";
-import { CharacterCastShowcase } from "@/components/characters/character-companion";
+import { AmbientGlyphRow } from "@/components/characters/glyphs";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +24,7 @@ export default async function Home() {
   return (
     <div className="flex min-h-[calc(100dvh-3.5rem)] flex-col items-center justify-center px-4 py-12 md:min-h-dvh md:py-16">
       <div className="w-full max-w-2xl">
-        <div className="mb-4 flex justify-center">
-          <SparkGlyph size={68} mood="excited" />
-        </div>
+        <AmbientGlyphRow />
         <h1 className="mb-3 text-center text-3xl font-semibold tracking-tight text-ink md:text-[2.25rem]">
           What would you like to learn?
         </h1>
@@ -45,7 +42,6 @@ export default async function Home() {
             </Link>
           </div>
         )}
-        <CharacterCastShowcase />
       </div>
     </div>
   );

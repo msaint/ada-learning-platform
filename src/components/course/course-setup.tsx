@@ -6,8 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, newKey } from "@/lib/client/api";
 import type { CourseDraftView } from "@/lib/schemas/dto";
 import { Button, InlineError, Spinner } from "@/components/ui/primitives";
-import { CharacterCompanion } from "@/components/characters/character-companion";
-import type { CharacterPresence } from "@/components/characters/state-machine";
 
 type Pending = null | "answer" | "back" | "propose" | "convert" | "adjust" | "background";
 
@@ -81,35 +79,12 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const learnerTurns = draft.turns.slice(1);
   const thinking = pending === "answer" || pending === "propose" || pending === "adjust" || pending === "back" || pending === "background";
 
-  const setupPresence: CharacterPresence =
-    draft.state === "ready"
-      ? {
-          character: "prism",
-          secondary: "spark",
-          mood: "celebrating",
-          trigger: "checkpoint_passed",
-          line: "Path locked in. Ready to start, or want to tune the focus first?",
-        }
-      : learnerTurns.length > 0
-        ? {
-            character: "link",
-            mood: thinking ? "thinking" : "guiding",
-            trigger: "hint_or_bridge",
-            line: thinking ? "Connecting your answers into a starting path." : "Pulling your goals together so we skip what you don't need.",
-          }
-        : {
-            character: "spark",
-            mood: "excited",
-            trigger: "cold_start",
-            line: "Ooh, fun topic. A quick question or two and we'll map out your first steps.",
-          };
-
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10 md:py-16">
       <p className="mb-1 text-sm text-muted">New course</p>
-      <p className={`${draft.sourcesRead.length ? "mb-3" : "mb-6"} text-xl font-semibold break-words text-ink`}>{draft.topic}</p>
+      <p className={`${draft.sourcesRead.length ? "mb-3" : "mb-8"} text-xl font-semibold break-words text-ink`}>{draft.topic}</p>
       {draft.sourcesRead.length > 0 && (
-        <p className="mb-6 text-sm text-muted">
+        <p className="mb-8 text-sm text-muted">
           Ada read:{" "}
           {draft.sourcesRead.map((s, i) => (
             <span key={s.url}>
@@ -121,8 +96,6 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
           ))}
         </p>
       )}
-
-      <CharacterCompanion presence={setupPresence} compact className="mb-7" />
 
       {learnerTurns.length > 0 && (
         <ol aria-label="Your answers so far" className="mb-8 space-y-2 rounded-xl border border-line bg-surface/60 px-4 py-3 text-sm break-words">

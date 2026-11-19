@@ -4,7 +4,6 @@ import { getProgress } from "@/lib/services/courses";
 import { BAND_LABEL } from "@/lib/learning/readiness";
 import { StatusBadge } from "@/components/course/status-badge";
 import { ExploreBranchButton } from "@/components/course/explore-branch-button";
-import { PrismGlyph, SparkGlyph } from "@/components/characters/glyphs";
 
 export const dynamic = "force-dynamic";
 
@@ -26,33 +25,23 @@ export default async function ProgressPage({ params }: { params: Promise<{ cours
   return (
     <div>
       {p.intent === "goal" && p.readiness && (
-        <section className="mb-8 flex items-start gap-4 rounded-2xl border border-prism/25 bg-surface px-5 py-4">
-          <div className="shrink-0 pt-0.5">
-            <PrismGlyph size={52} mood={p.readiness.band === "demonstrated" ? "celebrating" : "idle"} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-muted">Estimated readiness for: <span className="text-ink-soft">{p.goalText}</span></p>
-            <p className="mt-1 text-xl font-semibold text-ink">{BAND_LABEL[p.readiness.band]}</p>
-            <p className="mt-2 text-sm leading-relaxed text-ink-soft">{p.readiness.basis}</p>
-            <p className="mt-2 text-xs text-muted">An estimate from your answers so far — not a qualification.</p>
-          </div>
+        <section className="mb-8 rounded-2xl border border-line bg-surface px-5 py-4">
+          <p className="text-sm text-muted">Estimated readiness for: <span className="text-ink-soft">{p.goalText}</span></p>
+          <p className="mt-1 text-xl font-semibold text-ink">{BAND_LABEL[p.readiness.band]}</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-soft">{p.readiness.basis}</p>
+          <p className="mt-2 text-xs text-muted">An estimate from your answers so far — not a qualification.</p>
         </section>
       )}
 
       {p.intent === "curiosity" && p.curiosity && (
-        <section className="mb-8 flex items-start gap-4 rounded-2xl border border-spark/25 bg-surface px-5 py-4">
-          <div className="shrink-0 pt-0.5">
-            <SparkGlyph size={52} mood="excited" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-muted">Exploring: <span className="text-ink-soft">{p.goalText}</span></p>
-            <p className="mt-1 text-ink">
-              {p.curiosity.exploredCount === 0 ? "Nothing explored yet." : `You've explored ${p.curiosity.exploredCount} idea${p.curiosity.exploredCount === 1 ? "" : "s"}`}
-              {p.curiosity.branchCount > 0 ? ` and opened ${p.curiosity.branchCount} branch${p.curiosity.branchCount === 1 ? "" : "es"}` : ""}
-              {p.curiosity.exploredCount > 0 ? "." : ""}
-            </p>
-            <p className="mt-2 text-xs text-muted">Open-ended topics have no finish line, so there&apos;s no completion score here.</p>
-          </div>
+        <section className="mb-8 rounded-2xl border border-line bg-surface px-5 py-4">
+          <p className="text-sm text-muted">Exploring: <span className="text-ink-soft">{p.goalText}</span></p>
+          <p className="mt-1 text-ink">
+            {p.curiosity.exploredCount === 0 ? "Nothing explored yet." : `You've explored ${p.curiosity.exploredCount} idea${p.curiosity.exploredCount === 1 ? "" : "s"}`}
+            {p.curiosity.branchCount > 0 ? ` and opened ${p.curiosity.branchCount} branch${p.curiosity.branchCount === 1 ? "" : "es"}` : ""}
+            {p.curiosity.exploredCount > 0 ? "." : ""}
+          </p>
+          <p className="mt-2 text-xs text-muted">Open-ended topics have no finish line, so there&apos;s no completion score here.</p>
         </section>
       )}
 
