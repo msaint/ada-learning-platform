@@ -32,9 +32,12 @@ export function ok(data: unknown, init: { status?: number; headers?: Record<stri
 function assertSameOrigin(req: Request) {
   const origin = req.headers.get("origin");
   if (!origin) return;
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const rawHost = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const host = rawHost?.split(",")[0]?.trim();
   try {
-    if (new URL(origin).host !== host) throw new AppError("forbidden", "Cross-site request rejected.");
+    const originHost = new URL(origin).host;
+    const appHost = process.env.APP_URL ? new URL(process.env.APP_URL).host : null;
+    if (originHost !== host && originHost !== appHost) throw new AppError("forbidden", "Cross-site request rejected.");
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError("forbidden", "Cross-site request rejected.");

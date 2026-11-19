@@ -108,14 +108,29 @@ describe("Socratic lesson moves", () => {
     const s = [step("c1", "free_response", "defend", "partial")];
     expect(chooseNext({ ...base, concepts: [pc("c1", { history: learned })], sessionSteps: s })).toMatchObject({ purpose: "probe" });
   });
-  it("interleaves an unprompted recall check once other work has happened", () => {
+  it("interleaves an unprompted recall check once at least two other steps have happened", () => {
     const c1 = pc("c1", { status: "developing", needsRecall: true, history: learned });
     const c2 = pc("c2");
     // Right after c1: move on rather than re-asking c1 immediately.
     const afterC1 = chooseNext({ ...base, concepts: [c1, c2], sessionSteps: [step("c1", "free_response", "defend", "correct")] });
     expect(afterC1).toMatchObject({ conceptId: "c2" });
-    // After work on c2, come back to c1 for recall.
-    const later = chooseNext({ ...base, concepts: [c1, c2], sessionSteps: [step("c1", "free_response", "defend", "correct"), step("c2", "multiple_choice", "prediction", "correct")] });
+    // After only 1 intervening step on c2: still wait for genuine spacing.
+    const afterOne = chooseNext({
+      ...base,
+      concepts: [c1, c2],
+      sessionSteps: [step("c1", "free_response", "defend", "correct"), step("c2", "multiple_choice", "prediction", "correct")],
+    });
+    expect(afterOne).toMatchObject({ conceptId: "c2" });
+    // After 2 intervening steps on c2, come back to c1 for unprompted recall.
+    const later = chooseNext({
+      ...base,
+      concepts: [c1, c2],
+      sessionSteps: [
+        step("c1", "free_response", "defend", "correct"),
+        step("c2", "multiple_choice", "prediction", "correct"),
+        step("c2", "explanation", "teach", null),
+      ],
+    });
     expect(later).toMatchObject({ conceptId: "c1", purpose: "recall", kind: "multiple_choice" });
     // At the start of a new session, recall comes first.
     expect(chooseNext({ ...base, concepts: [c1, c2] })).toMatchObject({ conceptId: "c1", purpose: "recall" });

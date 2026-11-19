@@ -89,12 +89,12 @@ export function validateCurriculum(p: CurriculumProposal): ValidationResult<Curr
 export function validateExpansion(
   e: CurriculumExpansion,
   existingSlugs: string[],
-  mode: "branch" | "revise",
+  mode: "branch" | "revise" | "scaffold",
 ): ValidationResult<CurriculumExpansion> {
   const errors: string[] = [];
   const known = new Set(existingSlugs);
   const concepts = e.new_concepts.map((c) => ({ ...c, prerequisites: [...new Set(c.prerequisites)] }));
-  if (mode === "branch" && concepts.length === 0) errors.push("a branch must add at least one concept");
+  if ((mode === "branch" || mode === "scaffold") && concepts.length === 0) errors.push(`a ${mode} must add at least one concept`);
   if (concepts.length + existingSlugs.length > 60) errors.push("course graph would exceed 60 concepts");
   errors.push(...graphErrors(concepts, known));
   if (e.anchor_slug && !known.has(e.anchor_slug)) errors.push(`anchor_slug "${e.anchor_slug}" is not an existing concept`);

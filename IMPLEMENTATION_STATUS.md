@@ -30,9 +30,10 @@ All E2E and integration runs use the **deterministic development model**. They p
 
 ## Refinements (D20)
 - ✅ Sign-in attempt limit; scheduled cleanup endpoint + Vercel cron; lesson length from time budget; new course opens into its first step; pasted background in setup; usage queries in `docs/METRICS.md`. Covered by `tests/integration/refinements.test.ts`, unit tests and the E2E journeys.
-- 🟡 Web-checked explanations with sources: built and tested with a fake Claude client, **off by default** (`ADA_WEB_GROUNDING=on` to enable). Not yet run against the live API.
+- ✅ Web-checked explanations with sources: supports `ADA_WEB_GROUNDING=on|auto|off` (`auto` grounds concepts flagged `needs_fact_check` during compilation). Built and tested with a fake Claude client; verify against the live Anthropic API on Vercel.
+- ✅ Durable lesson notes (explanations, alternate explanations, and verified sources) in each Outline concept panel; richer DAG cues (`Builds on`, `Unlocks`, `Related to`); one-click **Explore as a branch** on open questions and session reflections; struggle-triggered **Break into simpler steps** prerequisite scaffolding; free-response **That felt misgraded** flagging; KaTeX math and syntax highlighting in safe Markdown; `sessions.ts` split into focused modules under `src/lib/services/sessions/`; Anthropic system prompt caching (`cache_control`) and static-first prompt prefix ordering; private MC `reasoning` field stripped from learner DTOs; held-out grading eval split (`evals/grading-cases-holdout.json`, `--split`).
 - 🟡 The cron job runs only once `CRON_SECRET` is set in Vercel.
-- ⏭️ Not built yet: streaming responses, evidence-driven re-planning, PDF upload, splitting `sessions.ts`.
+- ⏭️ Not built yet: streaming responses, PDF upload.
 
 ## Reliability under concurrency (D19)
 - ✅ Model calls no longer run inside database transactions; short-lived claims prevent duplicate calls; apply steps re-check state. Covered by `tests/integration/connections.test.ts` (no open transaction during model calls; 8 concurrent setups on a 3-connection pool finish; a double click makes one model call), which fails against the previous code.
@@ -81,9 +82,9 @@ Review items: one active per concept, +1 day after the first meaningful attempt,
 - ✅ Course deletion cascade, data export, account deletion with email confirmation.
 - ✅ Authorization regression suite. Idempotency under concurrent requests (draft create, answer, convert, attempt, next).
 - ✅ Accessibility: labeled controls, radiogroup semantics, focus moves on transitions (heading or Continue), Escape closes dialogs and drawer, ≥44px targets, reduced motion, no horizontal scroll at 390px.
-- 🟡 **No rate limiting on auth endpoints.** Sign-in brute-force throttling should come before a public launch.
+- ✅ Sign-in brute-force throttling via `auth_attempts` (per-email and per-IP sliding window).
 - ✅ Password reset and email confirmation (D21), once Resend is configured.
-- 🟡 Expired auth sessions are not garbage-collected (they are ignored once expired).
+- ✅ Expired auth sessions, work claims, email tokens, and stale guests cleaned up via `/api/cron/cleanup` (scheduled via `vercel.json` once `CRON_SECRET` is set).
 
 ## P0 Definition of Done
 
@@ -109,8 +110,7 @@ Review items: one active per concept, +1 day after the first meaningful attempt,
 
 ## Not implemented / deferred
 - ⏭️ Push or in-app notifications. Email reminders are built (D21).
-- ⏭️ Source-grounded retrieval and citations (P1). The `source_references` table exists, but nothing writes to it. Content is labeled AI-generated, and prompts forbid invented URLs.
-- ⏭️ Code execution sandbox, graph visualization, adaptive difficulty beyond the planner's difficulty steps, cross-course mentor recommendations (P1).
+- ⏭️ Code execution sandbox, graph visualization, cross-course mentor recommendations (P1).
 - ⏭️ Google sign-in.
 
 ## Suggested next steps

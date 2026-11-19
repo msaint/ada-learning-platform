@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "Ada", template: "%s · Ada" },
   description: "Ada teaches what no one bothered to make a course for.",
+  openGraph: {
+    title: "Ada",
+    description: "Ada teaches what no one bothered to make a course for.",
+  },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#ffffff" };

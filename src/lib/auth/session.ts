@@ -147,13 +147,27 @@ export function readCookie(header: string | null, name: string): string | null {
   return null;
 }
 
-export function sessionCookie(token: string, expiresAt: Date) {
-  const secure = process.env.NODE_ENV === "production" && (process.env.APP_BASE_URL ?? "").startsWith("https://") ? "; Secure" : "";
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}${secure}`;
+function isHttpsRequest(req?: Request): boolean {
+  if (req) {
+    const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    if (proto === "https") return true;
+    try {
+      if (new URL(req.url).protocol === "https:") return true;
+    } catch {
+      // ignore malformed URL
+    }
+  }
+  return (process.env.APP_URL ?? "").startsWith("https://") || (process.env.NODE_ENV === "production" && (process.env.APP_BASE_URL ?? "").startsWith("https://"));
 }
 
-export function clearSessionCookie() {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function sessionCookie(token: string, expiresAt: Date, req?: Request) {
+  const attrs = isHttpsRequest(req) ? "SameSite=None; Secure; Partitioned" : "SameSite=Lax";
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; ${attrs}; Expires=${expiresAt.toUTCString()}`;
+}
+
+export function clearSessionCookie(req?: Request) {
+  const attrs = isHttpsRequest(req) ? "SameSite=None; Secure; Partitioned" : "SameSite=Lax";
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; ${attrs}; Max-Age=0`;
 }
 
 /** First client IP from proxy headers (Vercel sets x-forwarded-for). */

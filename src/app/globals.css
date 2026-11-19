@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 @theme {
   --color-ink: #1d1e22;
@@ -144,3 +145,52 @@ body {
   font-size: 1rem;
   line-height: 1.65;
 }
+.ada-prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+}
+/* Restrained light-mode syntax highlighting for fenced code blocks */
+.ada-prose .hljs-comment,
+.ada-prose .hljs-quote {
+  color: #6b7280;
+  font-style: italic;
+}
+.ada-prose .hljs-keyword,
+.ada-prose .hljs-selector-tag,
+.ada-prose .hljs-subst {
+  color: #5b3ec8;
+  font-weight: 500;
+}
+.ada-prose .hljs-string,
+.ada-prose .hljs-doctag,
+.ada-prose .hljs-regexp {
+  color: #1f7a4d;
+}
+.ada-prose .hljs-number,
+.ada-prose .hljs-literal,
+.ada-prose .hljs-variable,
+.ada-prose .hljs-template-variable {
+  color: #8a5a00;
+}
+.ada-prose .hljs-title,
+.ada-prose .hljs-section,
+.ada-prose .hljs-selector-id,
+.ada-prose .hljs-type,
+.ada-prose .hljs-built_in {
+  color: #1d4ed8;
+}
+.ada-prose .hljs-attr,
+.ada-prose .hljs-attribute,
+.ada-prose .hljs-name {
+  color: #9a3412;
+}
+.ada-prose .hljs-deletion {
+  color: #a8332b;
+  background: #fcecea;
+}
+.ada-prose .hljs-addition {
+  color: #1f7a4d;
+  background: #eaf6ef;
+}
+

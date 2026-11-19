@@ -50,6 +50,8 @@ describe("LLM adapter", () => {
     expect(r.info).toMatchObject({ provider: "openai", model: "m-compile", repaired: false, inputTokens: 10 });
     expect(calls[0].user).toContain("JSON Schema");
     expect(calls[0].user).toContain('<learner_data name="topic">');
+    // Static schema instructions precede dynamic learner data to maximise prefix-cache hits.
+    expect(calls[0].user.indexOf("JSON Schema")).toBeLessThan(calls[0].user.indexOf('<learner_data name="topic">'));
   });
 
   it("repairs once after malformed JSON", async () => {
@@ -131,6 +133,7 @@ describe("activity DTO and shuffling", () => {
       { id: "z", text: "three" },
     ],
     correctChoiceId: "y",
+    reasoning: "private verification reasoning",
     rationale: "secret rationale",
     difficulty: 2,
   };
@@ -141,7 +144,7 @@ describe("activity DTO and shuffling", () => {
   });
   it("learner DTO never contains teacher-only fields", () => {
     const dto = toLearnerActivity({ id: "1", purpose: "check", spec_json: spec }, "C");
-    expect(JSON.stringify(dto)).not.toMatch(/correctChoiceId|secret rationale/);
+    expect(JSON.stringify(dto)).not.toMatch(/correctChoiceId|secret rationale|private verification reasoning|reasoning/);
     const fr = toLearnerActivity({ id: "2", purpose: "apply", spec_json: { version: 1, conceptId: "c", kind: "free_response", promptMarkdown: "Explain", rubric: [{ criterion: "hidden crit", importance: 1 }], idealAnswerPrivate: "hidden ideal", difficulty: 2 } }, "C");
     expect(JSON.stringify(fr)).not.toMatch(/hidden/);
   });

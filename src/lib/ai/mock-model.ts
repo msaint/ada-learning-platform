@@ -160,12 +160,12 @@ export class MockLearningModel implements LearningModel {
     maybeFail("compile", c.topic);
     const subject = subjectOf(c.topic);
     const concepts: CurriculumProposal["concepts"] = [
-      { slug: "core-idea", title: `The core idea of ${subject}`.slice(0, 120), description: `What ${subject} is about, in one clear picture.`, assessment_criteria: [`Explain the central idea of ${subject} in your own words`], importance: 3, prerequisites: [] },
-      { slug: "key-parts", title: "Key parts and terms", description: `The vocabulary and components needed to reason about ${subject}.`, assessment_criteria: ["Identify the main parts and what each does"], importance: 2, prerequisites: ["core-idea"] },
-      { slug: "how-it-works", title: "How it works", description: `The mechanism or cause-and-effect behind ${subject}.`, assessment_criteria: ["Predict what happens when one factor changes"], importance: 3, prerequisites: ["key-parts"] },
+      { slug: "core-idea", title: `The core idea of ${subject}`.slice(0, 120), description: `What ${subject} is about, in one clear picture.`, assessment_criteria: [`Explain the central idea of ${subject} in your own words`], importance: 3, prerequisites: [], needs_fact_check: false },
+      { slug: "key-parts", title: "Key parts and terms", description: `The vocabulary and components needed to reason about ${subject}.`, assessment_criteria: ["Identify the main parts and what each does"], importance: 2, prerequisites: ["core-idea"], needs_fact_check: false },
+      { slug: "how-it-works", title: "How it works", description: `The mechanism or cause-and-effect behind ${subject}.`, assessment_criteria: ["Predict what happens when one factor changes"], importance: 3, prerequisites: ["key-parts"], needs_fact_check: false },
     ];
     if (c.depth !== "quick") {
-      concepts.push({ slug: "misconceptions", title: "Common misconceptions", description: `Tempting but wrong ideas about ${subject}.`, assessment_criteria: ["Spot and correct a common mistaken explanation"], importance: 2, prerequisites: ["how-it-works"] });
+      concepts.push({ slug: "misconceptions", title: "Common misconceptions", description: `Tempting but wrong ideas about ${subject}.`, assessment_criteria: ["Spot and correct a common mistaken explanation"], importance: 2, prerequisites: ["how-it-works"], needs_fact_check: false });
       concepts.push({
         slug: "applying-it",
         title: c.intent === "goal" ? "Putting it into practice" : "Connections and consequences",
@@ -173,10 +173,11 @@ export class MockLearningModel implements LearningModel {
         assessment_criteria: ["Apply the idea to a new situation"],
         importance: c.intent === "goal" ? 3 : 1,
         prerequisites: ["how-it-works"],
+        needs_fact_check: false,
       });
     }
     if (c.adjustment) {
-      concepts.push({ slug: "requested-focus", title: `Focus: ${c.adjustment}`.slice(0, 120), description: `Added at your request: ${c.adjustment}`.slice(0, 600), assessment_criteria: ["Explain how this connects to the rest of the course"], importance: 2, prerequisites: ["core-idea"] });
+      concepts.push({ slug: "requested-focus", title: `Focus: ${c.adjustment}`.slice(0, 120), description: `Added at your request: ${c.adjustment}`.slice(0, 600), assessment_criteria: ["Explain how this connects to the rest of the course"], importance: 2, prerequisites: ["core-idea"], needs_fact_check: false });
     }
     return {
       value: {
@@ -195,14 +196,37 @@ export class MockLearningModel implements LearningModel {
   async expandCurriculum(c: ExpansionContext): Promise<WithInfo<CurriculumExpansion>> {
     maybeFail("expand", c.topic);
     const base = c.request.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "branch";
-    let slug = c.mode === "branch" ? `branch-${base}` : `goal-${base}`;
+    let slug = c.mode === "branch" ? `branch-${base}` : c.mode === "scaffold" ? `basics-${base}` : `goal-${base}`;
     const existing = new Set(c.existing.map((e) => e.slug));
     for (let i = 2; existing.has(slug); i++) slug = `${slug.slice(0, 50)}-${i}`;
-    const anchor = c.existing[0]?.slug ?? null;
+    const anchor = c.targetConcept?.slug ?? c.existing[0]?.slug ?? null;
+    if (c.mode === "scaffold" && c.targetConcept) {
+      return {
+        value: {
+          new_concepts: [
+            {
+              slug,
+              title: `Foundations for ${c.targetConcept.title}`.slice(0, 120),
+              description: `A smaller stepping stone before ${c.targetConcept.title}: isolate the core piece first.`,
+              assessment_criteria: [`Identify the basic building block behind ${c.targetConcept.title}`],
+              importance: 2,
+              prerequisites: [],
+              needs_fact_check: false,
+            },
+          ],
+          anchor_slug: c.targetConcept.slug,
+          keep_slugs: [],
+          direction: "",
+          success_criteria: [],
+          explanation: `Added a simpler stepping-stone concept before "${c.targetConcept.title}".`.slice(0, 400),
+        },
+        info: info("expand"),
+      };
+    }
     if (c.mode === "branch") {
       return {
         value: {
-          new_concepts: [{ slug, title: titleCase(c.request), description: `A curiosity branch: ${c.request}`.slice(0, 600), assessment_criteria: ["Explain how this connects to what you already know"], importance: 1, prerequisites: anchor ? [anchor] : [] }],
+          new_concepts: [{ slug, title: titleCase(c.request), description: `A curiosity branch: ${c.request}`.slice(0, 600), assessment_criteria: ["Explain how this connects to what you already know"], importance: 1, prerequisites: anchor ? [anchor] : [], needs_fact_check: false }],
           anchor_slug: anchor,
           keep_slugs: [],
           direction: "",
@@ -214,7 +238,7 @@ export class MockLearningModel implements LearningModel {
     }
     return {
       value: {
-        new_concepts: [{ slug, title: `Toward: ${c.goalText}`.slice(0, 120), description: `New material needed for the revised goal: ${c.goalText}`.slice(0, 600), assessment_criteria: ["Apply the course ideas to the new goal"], importance: 3, prerequisites: existing.has("how-it-works") ? ["how-it-works"] : [] }],
+        new_concepts: [{ slug, title: `Toward: ${c.goalText}`.slice(0, 120), description: `New material needed for the revised goal: ${c.goalText}`.slice(0, 600), assessment_criteria: ["Apply the course ideas to the new goal"], importance: 3, prerequisites: existing.has("how-it-works") ? ["how-it-works"] : [], needs_fact_check: false }],
         anchor_slug: null,
         keep_slugs: c.existing.filter((e) => e.slug !== "misconceptions").map((e) => e.slug),
         direction: `Work toward: ${c.goalText}.`.slice(0, 300),

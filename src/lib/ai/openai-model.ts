@@ -118,7 +118,8 @@ export class LLMLearningModel implements LearningModel {
     const webSearch = !!opts.webSearch && !!this.transport.supportsWebSearch;
     const sources = new Map<string, FetchedSource>();
     const jsonSchema = JSON.stringify(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }));
-    const baseUser = `${user}\n\nJSON Schema for your output:\n${jsonSchema}`;
+    // Static schema first so provider prefix caches hit across calls sharing the same operation schema.
+    const baseUser = `JSON Schema for your output:\n${jsonSchema}\n\n${user}`;
     const started = Date.now();
     let inputTokens = 0;
     let outputTokens = 0;

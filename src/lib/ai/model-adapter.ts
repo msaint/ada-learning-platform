@@ -59,13 +59,14 @@ export type CurriculumContext = {
 };
 
 export type ExpansionContext = {
-  mode: "branch" | "revise";
+  mode: "branch" | "revise" | "scaffold";
   topic: string;
   intent: "curiosity" | "goal";
   goalText: string;
   previousGoalText?: string;
-  request: string; // branch question or revision reason
+  request: string; // branch question, revision reason, or struggling concept summary
   existing: { slug: string; title: string; status: string }[];
+  targetConcept?: { slug: string; title: string; description: string };
   linkContext?: string | null;
 };
 

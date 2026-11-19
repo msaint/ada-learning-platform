@@ -46,6 +46,7 @@ describe("Anthropic web fetch transport", () => {
     await t.complete(req(false));
     await t.complete(req(true));
     expect(calls[0].tools).toBeUndefined();
+    expect(calls[0].system).toEqual([{ type: "text", text: "s", cache_control: { type: "ephemeral" } }]);
     expect(calls[1].tools).toEqual([{ type: "web_fetch_20260209", name: "web_fetch", max_uses: 3, max_content_tokens: 12000 }]);
   });
 

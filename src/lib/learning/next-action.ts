@@ -79,6 +79,8 @@ export type PlannerDecision = PlannedActivity | { action: "complete"; reason: st
 
 const DEFAULT_LIMITS = { lesson: 8, review: 3, perConcept: 5 };
 export const PLACEMENT_MAX = 5;
+/** Minimum intervening activities on other concepts before triggering unprompted recall within the same session. */
+export const MIN_RECALL_GAP = 2;
 
 /**
  * Lesson length follows what the learner told Ada at setup: a small weekly
@@ -226,9 +228,13 @@ function planLesson(input: PlannerInput): PlannerDecision {
     return act(last.conceptId, "free_response", "defend", 2, "devils_advocate_on_correct_answer");
   }
 
-  // --- Interleaved recall: concepts that only lack an unprompted check, after other work.
+  // --- Interleaved recall: concepts that only lack an unprompted check, after ≥2 intervening steps on other concepts (or at the start of a new session).
   const lastIndexOf = (id: string) => steps.map((s) => s.conceptId).lastIndexOf(id);
-  const recall = ordered(input.concepts).find((c) => c.needsRecall && c.status !== "demonstrated" && (lastIndexOf(c.id) === -1 || lastIndexOf(c.id) < steps.length - 1));
+  const recall = ordered(input.concepts).find((c) => {
+    if (!c.needsRecall || c.status === "demonstrated") return false;
+    const lastIdx = lastIndexOf(c.id);
+    return lastIdx === -1 || steps.length - 1 - lastIdx >= MIN_RECALL_GAP;
+  });
   if (recall) {
     return act(recall.id, recall.history.lastAssessKind === "free_response" ? "multiple_choice" : "free_response", "recall", 2, "interleaved_unprompted_recall");
   }

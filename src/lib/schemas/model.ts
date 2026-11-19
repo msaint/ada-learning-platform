@@ -57,6 +57,8 @@ export const ConceptProposalSchema = z.object({
   assessment_criteria: z.array(shortText(240)).min(1).max(5),
   importance: z.number().int().min(1).max(3).default(2),
   prerequisites: z.array(SlugSchema).max(6).default([]),
+  /** True when the concept involves time-sensitive, regulatory, statistical, or niche factual claims worth web-checking. */
+  needs_fact_check: z.boolean().default(false),
 });
 export type ConceptProposal = z.infer<typeof ConceptProposalSchema>;
 
@@ -103,6 +105,8 @@ export const MultipleChoiceGenSchema = z
       .array(z.object({ id: z.string().trim().min(1).max(20), text: shortText(300) }))
       .min(3)
       .max(5),
+    /** Private chain-of-thought solved before picking correctChoiceId (never sent to the learner). */
+    reasoning: z.string().trim().max(800).optional(),
     correctChoiceId: z.string().trim().min(1).max(20),
     rationale: shortText(1500),
     difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]),

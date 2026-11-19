@@ -31,7 +31,7 @@ export const POST = publicRoute(
       if (old) await destroySession(old);
     }
     const s = await createSession(account.id);
-    return ok({ user: { id: account.id, email: account.email }, mergedGuestData: !!user?.isGuest }, { headers: { "set-cookie": sessionCookie(s.token, s.expiresAt) } });
+    return ok({ user: { id: account.id, email: account.email }, mergedGuestData: !!user?.isGuest }, { headers: { "set-cookie": sessionCookie(s.token, s.expiresAt, req) } });
   },
   { body: SignInBody },
 );

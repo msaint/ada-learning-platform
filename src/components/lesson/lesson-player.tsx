@@ -6,11 +6,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, newKey } from "@/lib/client/api";
 import type { NextAction, SessionView, InlineError as InlineErrorT } from "@/lib/schemas/dto";
 import { Button, InlineError, Spinner } from "@/components/ui/primitives";
+import { ExploreBranchButton } from "@/components/course/explore-branch-button";
 import { ActivityView } from "./activity-renderer";
 import { FeedbackPanel } from "./feedback";
 
 type View = SessionView & { error?: InlineErrorT | null };
-type Busy = null | "start" | "submit" | "next" | "hint" | "explain" | "pause" | "skip" | "reveal" | "difficulty";
+type Busy = null | "start" | "submit" | "next" | "hint" | "explain" | "pause" | "skip" | "reveal" | "difficulty" | "flag" | "breakdown";
 const KIND_LABEL: Record<SessionView["kind"], string> = { lesson: "Lesson", review: "Review", placement: "Placement", assessment: "Final check" };
 
 export function LessonPlayer({
@@ -175,6 +176,31 @@ export function LessonPlayer({
     await call("difficulty", async () => (await api<{ session: View }>(`/sessions/${id}/difficulty`, { body: { offset } })).session);
   }
 
+  async function flag() {
+    if (!session?.activity) return;
+    const id = session.activity.id;
+    await call("flag", async () => (await api<{ session: View }>(`/activities/${id}/flag`, { body: {} })).session);
+  }
+
+  async function breakdown(conceptId: string) {
+    setBusy("breakdown");
+    setError(null);
+    try {
+      const r = await api<{ firstConceptId: string }>(`/courses/${courseId}/concepts/${conceptId}/breakdown`, { body: {} });
+      let nextView = (await api<{ session: View }>(`/courses/${courseId}/sessions`, { body: { kind: "lesson", focusConceptId: r.firstConceptId } })).session;
+      if (nextView.status === "active" && nextView.phase === "feedback" && nextView.activity) {
+        nextView = (await api<{ session: View }>(`/sessions/${nextView.id}/next`, { body: { fromActivityId: nextView.activity.id } })).session;
+      }
+      adopt(nextView, { resetInput: true });
+      router.refresh();
+    } catch (e) {
+      const err = e instanceof ApiError ? e : null;
+      setError({ message: err?.message ?? "Couldn't break this concept into simpler steps.", retry: err?.retryable ? () => breakdown(conceptId) : undefined });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function pause() {
     if (!session) return;
     if (saveTimer.current) {
@@ -232,6 +258,19 @@ export function LessonPlayer({
                 {s.assessed > 0 ? `You answered ${s.assessed} question${s.assessed === 1 ? "" : "s"}, ${s.correct} correct.` : "Nice work."}{" "}
                 {s.conceptsTouched.length > 0 && <>Covered: {s.conceptsTouched.join(", ")}.</>}
               </p>
+              {s.reflections && s.reflections.length > 0 && (
+                <div className="mb-6 rounded-xl border border-line px-4 py-3 text-sm">
+                  <p className="mb-2 font-medium text-ink">Questions you noted</p>
+                  <ul className="space-y-2 text-ink-soft">
+                    {s.reflections.map((q, i) => (
+                      <li key={i} className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 flex-1 break-words">{q}</span>
+                        <ExploreBranchButton courseId={courseId} question={q} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           ) : nextAction.kind === "placement" ? (
             <>
@@ -424,7 +463,7 @@ export function LessonPlayer({
 
           {answered && session.feedback && (
             <div ref={phase === "evaluating" ? focusRef : undefined} tabIndex={-1} className="mt-6 focus:outline-none">
-              <FeedbackPanel feedback={session.feedback} activityKind={a.kind} />
+              <FeedbackPanel feedback={session.feedback} activityKind={a.kind} onFlag={flag} flagging={busy === "flag"} />
               <div className="mt-5 flex flex-wrap gap-2">
                 {phase === "evaluating" ? (
                   <Button variant="primary" onClick={() => submit()} busy={busy === "submit"}>
@@ -438,6 +477,11 @@ export function LessonPlayer({
                     {session.feedback.withheld && session.kind === "lesson" && (
                       <Button variant="quiet" onClick={reveal} busy={busy === "reveal"} disabled={!!busy}>
                         Show me the answer
+                      </Button>
+                    )}
+                    {session.suggestBreakdown && session.kind === "lesson" && (
+                      <Button variant="quiet" onClick={() => breakdown(session.suggestBreakdown!.conceptId)} busy={busy === "breakdown"} disabled={!!busy}>
+                        Break this into simpler steps
                       </Button>
                     )}
                   </>

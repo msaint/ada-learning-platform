@@ -54,7 +54,7 @@ export class AnthropicTransport implements JsonTransport {
         {
           model: req.model,
           max_tokens: Math.max(16000, req.maxTokens),
-          system: req.system,
+          system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
           messages,
           ...(req.webFetch || req.webSearch ? { tools: [...(req.webFetch ? [WEB_FETCH_TOOL] : []), ...(req.webSearch ? [WEB_SEARCH_TOOL] : [])] } : {}),
           ...((req.effort ?? this.opts.effort) ? { output_config: { effort: (req.effort ?? this.opts.effort) as AnthropicEffort } } : {}),

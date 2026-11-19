@@ -95,6 +95,8 @@ export type ActivityFeedback = {
   withheld?: boolean;
   /** The learner chose to see a withheld answer. */
   revealed?: boolean;
+  /** The learner flagged this automated grade as seeming off. */
+  flagged?: boolean;
 };
 
 export type SessionKindDTO = "lesson" | "review" | "placement" | "assessment";
@@ -109,6 +111,8 @@ export type SessionSummary = {
   suggestedConceptId?: string | null;
   /** Final mixed assessment outcome. */
   assessment?: { passed: boolean; missed: string[] };
+  /** Reflections written during this session (can be turned into a branch with one click). */
+  reflections?: string[];
 };
 
 export type SessionPhase = "choosing_next" | "awaiting_response" | "evaluating" | "feedback" | "paused" | "completed";
@@ -128,11 +132,22 @@ export type SessionView = {
   altExplanations: string[];
   feedback: ActivityFeedback | null;
   summary: SessionSummary | null;
+  /** Offered quietly when the learner has repeatedly missed the current concept. */
+  suggestBreakdown?: { conceptId: string; conceptTitle: string } | null;
   devModel: boolean;
   aiGenerated: boolean;
 };
 
 export type DisplayStatusDTO = "not_assessed" | "developing" | "demonstrated" | "review_due";
+
+export type ConceptNote = {
+  id: string;
+  title: string | null;
+  bodyMarkdown: string;
+  altExplanations: string[];
+  sources: { url: string; title: string | null }[];
+  at: string;
+};
 
 export type OutlineView = {
   courseId: string;
@@ -147,6 +162,10 @@ export type OutlineView = {
     status: DisplayStatusDTO;
     depth: number;
     prerequisiteTitles: string[];
+    unlocksTitles: string[];
+    relatedTitles: string[];
+    struggling: boolean;
+    notes: ConceptNote[];
     origin: "initial" | "branch" | "revision";
     inCurrentPlan: boolean;
     evidence: { result: string; independence: string; kind: string; at: string; reason: string }[];

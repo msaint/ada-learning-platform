@@ -12,6 +12,8 @@ export type TelemetryEvent =
   | "review_due"
   | "review_completed"
   | "course_goal_revised"
+  | "grading_flagged"
+  | "concept_scaffolded"
   | "model_error";
 
 /** Operational events only — never raw learner answer text. Failures never break the request. */

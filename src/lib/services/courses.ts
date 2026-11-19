@@ -1,10 +1,11 @@
 import { db, json, tx } from "@/lib/db/client";
-import { AppError, conflict } from "@/lib/errors";
+import { AppError, conflict, notFound } from "@/lib/errors";
 import { callModel } from "@/lib/ai";
 import { validateExpansion } from "@/lib/learning/curriculum";
 import { estimateReadiness } from "@/lib/learning/readiness";
 import { formatInZone } from "@/lib/learning/review-scheduler";
 import type { CourseHeader, CourseListItem, CourseProgress, OutlineView } from "@/lib/schemas/dto";
+import type { FetchedSource } from "@/lib/ai/model-adapter";
 import { insertConcepts } from "./drafts";
 import { computeNextAction, loadActiveGoal, loadConceptStates, loadCourse, loadFinalPassed, loadPlan, type ConceptState } from "./learning-state";
 import { track } from "./telemetry";
@@ -104,8 +105,9 @@ export async function reviseGoal(ownerId: string, courseId: string, input: { goa
     const [{ maxPos }] = await t<{ maxPos: number }[]>`select coalesce(max(position), 0)::int as "maxPos" from concepts where course_id = ${courseId}`;
     await insertConcepts(t, courseId, exp.new_concepts, maxPos + 1, "revision", existing);
     const plan = await loadPlan(t, courseId);
+    const factCheckSlugs = [...new Set([...(plan.plan_json.fact_check_slugs ?? []), ...exp.new_concepts.filter((n) => n.needs_fact_check).map((n) => n.slug)])];
     await t`insert into course_curriculum_versions (course_id, version, plan_json, reason, model_info_json)
-      values (${courseId}, ${plan.version + 1}, ${json({ direction: exp.direction, required_slugs: [...exp.keep_slugs, ...exp.new_concepts.map((n) => n.slug)], explanation: exp.explanation, goal_version: v + 1 })}, 'goal_revised', ${json(info)})`;
+      values (${courseId}, ${plan.version + 1}, ${json({ direction: exp.direction, required_slugs: [...exp.keep_slugs, ...exp.new_concepts.map((n) => n.slug)], fact_check_slugs: factCheckSlugs, explanation: exp.explanation, goal_version: v + 1 })}, 'goal_revised', ${json(info)})`;
     await t`insert into course_events (course_id, event_type, payload_json) values (${courseId}, 'goal_revised', ${json({ from: goal.version, to: v + 1, added: exp.new_concepts.length, kept: exp.keep_slugs.length })})`;
     return { goalVersion: v + 1, explanation: exp.explanation, added: exp.new_concepts.map((n) => n.title), courseVersion: c.version + 1 };
   });
@@ -146,12 +148,72 @@ export async function addBranch(ownerId: string, courseId: string, question: str
     }
     const plan = await loadPlan(t, courseId);
     const required = [...(plan.plan_json.required_slugs ?? concepts.map((c) => c.slug)), ...exp.new_concepts.map((n) => n.slug)];
+    const factCheckSlugs = [...new Set([...(plan.plan_json.fact_check_slugs ?? []), ...exp.new_concepts.filter((n) => n.needs_fact_check).map((n) => n.slug)])];
     await t`insert into course_curriculum_versions (course_id, version, plan_json, reason, model_info_json)
-      values (${courseId}, ${plan.version + 1}, ${json({ ...plan.plan_json, required_slugs: required, explanation: exp.explanation })}, 'branch', ${json(info)})`;
+      values (${courseId}, ${plan.version + 1}, ${json({ ...plan.plan_json, required_slugs: required, fact_check_slugs: factCheckSlugs, explanation: exp.explanation })}, 'branch', ${json(info)})`;
     await t`insert into course_events (course_id, event_type, payload_json) values (${courseId}, 'branch_added', ${json({ added: exp.new_concepts.length })})`;
     const firstId = ids.get(exp.new_concepts[0].slug)!;
     return { conceptIds: exp.new_concepts.map((n) => ids.get(n.slug)!), firstConceptId: firstId, explanation: exp.explanation };
   });
+}
+
+/**
+ * Breaks a concept down into 1–2 simpler prerequisite stepping stones when a learner
+ * is struggling, inserting prerequisite edges into the target concept without losing history.
+ */
+export async function addPrerequisiteScaffold(ownerId: string, courseId: string, conceptId: string) {
+  const course = await loadCourse(db(), ownerId, courseId);
+  const goal = await loadActiveGoal(db(), course);
+  const concepts = await loadConceptStates(db(), courseId);
+  const target = concepts.find((c) => c.id === conceptId);
+  if (!target) throw notFound("Concept");
+  const misconceptions = await db()<{ m: string }[]>`
+    select at.feedback_json->>'misconception' as m from attempts at join activities a on a.id = at.activity_id
+    where a.concept_id = ${conceptId} and at.feedback_json->>'misconception' is not null order by at.submitted_at desc limit 3`;
+  const struggleSummary = misconceptions.length
+    ? `Repeated misses on "${target.title}". Suspected misconceptions: ${misconceptions.map((x) => x.m).join("; ")}`
+    : `Repeated misses on "${target.title}". Learner asked to break this concept into simpler stepping stones.`;
+  const { value, info } = await callModel(ownerId, "expand", (m) =>
+    m.expandCurriculum({
+      mode: "scaffold",
+      topic: course.topic,
+      intent: course.intent,
+      goalText: goal.goal_text,
+      request: struggleSummary,
+      existing: concepts.map((c) => ({ slug: c.slug, title: c.title, status: c.display })),
+      targetConcept: { slug: target.slug, title: target.title, description: target.description },
+      linkContext: goal.baseline_json?.link_context ?? null,
+    }),
+  );
+  // Ensure new stepping-stone concepts never depend on the target itself (which would create a cycle once linked as prerequisites of target).
+  const sanitized = {
+    ...value,
+    new_concepts: value.new_concepts.slice(0, 2).map((n) => ({ ...n, prerequisites: n.prerequisites.filter((p) => p !== target.slug) })),
+  };
+  const checked = validateExpansion(sanitized, concepts.map((c) => c.slug), "scaffold");
+  if (!checked.ok) throw new AppError("model_invalid_output", "Couldn't build stepping stones for that concept. Please retry.", true);
+  const exp = checked.value;
+  const result = await tx(async (t) => {
+    await loadCourse(t, ownerId, courseId, true);
+    const existing = new Map(concepts.map((x) => [x.slug, x.id]));
+    const [{ maxPos }] = await t<{ maxPos: number }[]>`select coalesce(max(position), 0)::int as "maxPos" from concepts where course_id = ${courseId}`;
+    const ids = await insertConcepts(t, courseId, exp.new_concepts, maxPos + 1, "revision", existing);
+    // Link every newly created stepping stone as a prerequisite of the struggling target concept.
+    for (const n of exp.new_concepts) {
+      const newId = ids.get(n.slug)!;
+      await t`insert into concept_edges (course_id, from_concept_id, to_concept_id, edge_type) values (${courseId}, ${newId}, ${target.id}, 'prerequisite') on conflict do nothing`;
+    }
+    const plan = await loadPlan(t, courseId);
+    const required = [...new Set([...(plan.plan_json.required_slugs ?? concepts.map((c) => c.slug)), ...exp.new_concepts.map((n) => n.slug)])];
+    const factCheckSlugs = [...new Set([...(plan.plan_json.fact_check_slugs ?? []), ...exp.new_concepts.filter((n) => n.needs_fact_check).map((n) => n.slug)])];
+    await t`insert into course_curriculum_versions (course_id, version, plan_json, reason, model_info_json)
+      values (${courseId}, ${plan.version + 1}, ${json({ ...plan.plan_json, required_slugs: required, fact_check_slugs: factCheckSlugs, explanation: exp.explanation || `Added simpler stepping stones before "${target.title}".` })}, 'scaffold', ${json(info)})`;
+    await t`insert into course_events (course_id, event_type, payload_json) values (${courseId}, 'concept_scaffolded', ${json({ targetConceptId: target.id, added: exp.new_concepts.length })})`;
+    const firstId = ids.get(exp.new_concepts[0].slug)!;
+    return { conceptIds: exp.new_concepts.map((n) => ids.get(n.slug)!), firstConceptId: firstId, explanation: exp.explanation };
+  });
+  await track(ownerId, "concept_scaffolded", { added: result.conceptIds.length });
+  return result;
 }
 
 function depthOf(c: ConceptState, byId: Map<string, ConceptState>, seen = new Set<string>()): number {
@@ -167,27 +229,81 @@ export async function getOutline(ownerId: string, courseId: string): Promise<Out
   const evidence = await db()<{ concept_id: string; result: string; independence: string; activity_kind: string; created_at: Date; reason: string }[]>`
     select concept_id, result, independence, activity_kind, created_at, reason from assessment_evidence
     where course_id = ${courseId} order by created_at desc`;
+  const relatedEdges = await db()<{ from_concept_id: string; to_concept_id: string }[]>`
+    select from_concept_id, to_concept_id from concept_edges where course_id = ${courseId} and edge_type = 'related'`;
+  const explanations = await db()<{
+    id: string;
+    concept_id: string;
+    spec_json: { title?: string; bodyMarkdown?: string };
+    alt_explanations_json: { text: string }[];
+    model_info_json: Record<string, unknown>;
+    created_at: Date;
+  }[]>`
+    select id, concept_id, spec_json, alt_explanations_json, model_info_json, created_at from activities
+    where course_id = ${courseId} and kind = 'explanation' order by created_at asc`;
+  const sourceRows = await db()<{ activity_id: string; title: string; url: string }[]>`
+    select activity_id, title, url from source_references
+    where course_id = ${courseId} and activity_id is not null order by retrieved_at asc`;
+
+  const sourcesByActivity = new Map<string, { url: string; title: string | null }[]>();
+  for (const s of sourceRows) {
+    const list = sourcesByActivity.get(s.activity_id) ?? [];
+    if (!list.some((x) => x.url === s.url)) list.push({ url: s.url, title: s.title || null });
+    sourcesByActivity.set(s.activity_id, list);
+  }
+
   const byId = new Map(concepts.map((c) => [c.id, c]));
   return {
     courseId,
     curriculumVersion: plan.version,
     revisionNote: plan.plan_json.explanation ?? null,
-    concepts: concepts.map((c) => ({
-      id: c.id,
-      slug: c.slug,
-      title: c.title,
-      description: c.description,
-      criteria: c.criteria,
-      status: c.display,
-      depth: Math.min(3, depthOf(c, byId)),
-      prerequisiteTitles: c.prerequisiteIds.map((p) => byId.get(p)?.title ?? "").filter(Boolean),
-      origin: c.origin,
-      inCurrentPlan: c.inPlan,
-      evidence: evidence
-        .filter((e) => e.concept_id === c.id)
-        .slice(0, 6)
-        .map((e) => ({ result: e.result, independence: e.independence, kind: e.activity_kind, at: e.created_at.toISOString(), reason: e.result === "exposure" ? "" : e.reason.slice(0, 200) })),
-    })),
+    concepts: concepts.map((c) => {
+      const conceptEvidence = evidence.filter((e) => e.concept_id === c.id);
+      const misses = conceptEvidence.filter((e) => e.result === "incorrect" || e.result === "partial").length;
+      const unlocksTitles = concepts.filter((other) => other.prerequisiteIds.includes(c.id)).map((other) => other.title);
+      const relatedIds = new Set<string>();
+      for (const edge of relatedEdges) {
+        if (edge.from_concept_id === c.id) relatedIds.add(edge.to_concept_id);
+        if (edge.to_concept_id === c.id) relatedIds.add(edge.from_concept_id);
+      }
+      const relatedTitles = [...relatedIds].map((id) => byId.get(id)?.title ?? "").filter(Boolean);
+      const notes = explanations
+        .filter((a) => a.concept_id === c.id && typeof a.spec_json?.bodyMarkdown === "string" && a.spec_json.bodyMarkdown.length > 0)
+        .map((a) => {
+          const mergedSources = new Map<string, { url: string; title: string | null }>();
+          for (const s of sourcesByActivity.get(a.id) ?? []) mergedSources.set(s.url, s);
+          for (const s of ((a.model_info_json?.sources as FetchedSource[] | undefined) ?? []).filter((x) => /^https?:\/\//i.test(x.url))) {
+            if (!mergedSources.has(s.url)) mergedSources.set(s.url, { url: s.url, title: s.title });
+          }
+          return {
+            id: a.id,
+            title: a.spec_json.title ?? null,
+            bodyMarkdown: a.spec_json.bodyMarkdown!,
+            altExplanations: (a.alt_explanations_json ?? []).map((x) => x.text).filter(Boolean),
+            sources: [...mergedSources.values()],
+            at: a.created_at.toISOString(),
+          };
+        });
+      return {
+        id: c.id,
+        slug: c.slug,
+        title: c.title,
+        description: c.description,
+        criteria: c.criteria,
+        status: c.display,
+        depth: Math.min(3, depthOf(c, byId)),
+        prerequisiteTitles: c.prerequisiteIds.map((p) => byId.get(p)?.title ?? "").filter(Boolean),
+        unlocksTitles,
+        relatedTitles,
+        struggling: c.mastery !== "demonstrated" && misses >= 2,
+        notes,
+        origin: c.origin,
+        inCurrentPlan: c.inPlan,
+        evidence: conceptEvidence
+          .slice(0, 6)
+          .map((e) => ({ result: e.result, independence: e.independence, kind: e.activity_kind, at: e.created_at.toISOString(), reason: e.result === "exposure" ? "" : e.reason.slice(0, 200) })),
+      };
+    }),
   };
 }
 
@@ -218,7 +334,7 @@ export async function getProgress(ownerId: string, courseId: string, timezone: s
   if (course.intent === "goal") {
     const required = concepts.filter((c) => c.inPlan);
     progress.readiness = estimateReadiness(
-      required.map((c) => ({ slug: c.slug, title: c.title, status: c.display, importance: c.importance, prerequisites: c.prerequisiteIds.map((p) => concepts.find((x) => x.id === p)?.slug ?? ""), evidenceCount: c.evidenceCount })),
+      required.map((c) => ({ slug: c.slug, title: c.title, status: c.mastery, importance: c.importance, prerequisites: c.prerequisiteIds.map((p) => concepts.find((x) => x.id === p)?.slug ?? ""), evidenceCount: c.evidenceCount })),
       { finalAssessmentPassed: finalPassed },
     );
   } else {

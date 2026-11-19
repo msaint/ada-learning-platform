@@ -74,6 +74,10 @@ export const AttemptBody = z.object({
   ]),
 });
 
+export const FlagGradingBody = z.object({
+  note: z.string().trim().max(300).optional(),
+});
+
 export const PostponeBody = z.object({ days: z.number().int().min(1).max(14).default(1) });
 
 export const PreferencesBody = z.object({

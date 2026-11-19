@@ -4,9 +4,9 @@ import { clearSessionCookie } from "@/lib/auth/session";
 import { deleteAccount } from "@/lib/services/account";
 
 export const DELETE = route(
-  async ({ user, body }) => {
+  async ({ req, user, body }) => {
     await deleteAccount(user.id, body.confirmEmail);
-    return ok({ deleted: true }, { headers: { "set-cookie": clearSessionCookie() } });
+    return ok({ deleted: true }, { headers: { "set-cookie": clearSessionCookie(req) } });
   },
   { body: DeleteAccountBody },
 );

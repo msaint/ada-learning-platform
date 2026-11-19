@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { OutlineView } from "@/lib/schemas/dto";
 import { api, ApiError } from "@/lib/client/api";
 import { Button, InlineError } from "@/components/ui/primitives";
+import { Markdown } from "@/components/ui/markdown";
 import { StatusBadge } from "./status-badge";
 
 const RESULT: Record<string, string> = { correct: "Correct", partial: "Partial", incorrect: "Missed", uncertain: "Ungraded", exposure: "Viewed/skipped" };
@@ -15,7 +16,9 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
   const [open, setOpen] = useState<string | null>(null);
   const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [breakingId, setBreakingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [conceptError, setConceptError] = useState<{ conceptId: string; message: string } | null>(null);
 
   async function addBranch() {
     setBusy(true);
@@ -29,6 +32,19 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
       setError(e instanceof ApiError ? e.message : "Couldn't add that branch.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function breakIntoSteps(conceptId: string) {
+    setBreakingId(conceptId);
+    setConceptError(null);
+    try {
+      const r = await api<{ firstConceptId: string }>(`/courses/${outline.courseId}/concepts/${conceptId}/breakdown`, { body: {} });
+      router.push(`/app/courses/${outline.courseId}?focus=${r.firstConceptId}`);
+      router.refresh();
+    } catch (e) {
+      setConceptError({ conceptId, message: e instanceof ApiError ? e.message : "Couldn't break this concept down." });
+      setBreakingId(null);
     }
   }
 
@@ -53,7 +69,7 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
                 <span className="min-w-0 flex-1">
                   <span className="block break-words text-ink">{c.title}</span>
                   {(c.origin !== "initial" || !c.inCurrentPlan) && (
-                    <span className="text-xs text-muted">{!c.inCurrentPlan ? "From an earlier goal" : c.origin === "branch" ? "Curiosity branch" : "Added for your new goal"}</span>
+                    <span className="text-xs text-muted">{!c.inCurrentPlan ? "From an earlier goal" : c.origin === "branch" ? "Curiosity branch" : "Added as your plan adapted"}</span>
                   )}
                 </span>
                 <StatusBadge status={c.status} />
@@ -71,7 +87,54 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
                       </ul>
                     )}
                   </div>
-                  {c.prerequisiteTitles.length > 0 && <p className="text-muted">Builds on: {c.prerequisiteTitles.join(", ")}</p>}
+                  {(c.prerequisiteTitles.length > 0 || c.unlocksTitles.length > 0 || c.relatedTitles.length > 0) && (
+                    <div className="space-y-1 text-muted">
+                      {c.prerequisiteTitles.length > 0 && <p>Builds on: {c.prerequisiteTitles.join(", ")}</p>}
+                      {c.unlocksTitles.length > 0 && <p>Unlocks: {c.unlocksTitles.join(", ")}</p>}
+                      {c.relatedTitles.length > 0 && <p>Related to: {c.relatedTitles.join(", ")}</p>}
+                    </div>
+                  )}
+                  {c.notes.length > 0 && (
+                    <details className="rounded-lg border border-line bg-paper px-4 py-3">
+                      <summary className="cursor-pointer font-medium text-ink">
+                        Lesson notes &amp; explanations ({c.notes.length})
+                      </summary>
+                      <div className="mt-3 space-y-4">
+                        {c.notes.map((n, idx) => (
+                          <article key={idx} className={clsx(idx > 0 && "border-t border-line pt-4")}>
+                            <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                              <h4 className="font-medium text-ink">{n.title}</h4>
+                              <span className="text-xs text-muted">{new Date(n.at).toLocaleDateString()}</span>
+                            </div>
+                            <Markdown compact>{n.bodyMarkdown}</Markdown>
+                            {n.altExplanations.length > 0 && (
+                              <div className="mt-3 space-y-2 border-l-2 border-line pl-3">
+                                {n.altExplanations.map((alt, j) => (
+                                  <div key={j}>
+                                    <p className="mb-1 text-xs font-medium text-muted">Another angle</p>
+                                    <Markdown compact>{alt}</Markdown>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {n.sources.length > 0 && (
+                              <div className="mt-3 text-xs text-muted">
+                                <span className="font-medium">Sources: </span>
+                                {n.sources.map((src, j) => (
+                                  <span key={src.url}>
+                                    {j > 0 ? " · " : ""}
+                                    <a href={src.url} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2 hover:text-ink">
+                                      {src.title || src.url}
+                                    </a>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </article>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   <div>
                     <h3 className="mb-1 font-medium">Evidence</h3>
                     {c.evidence.length === 0 ? (
@@ -87,9 +150,19 @@ export function OutlineList({ outline }: { outline: OutlineView }) {
                       </ul>
                     )}
                   </div>
-                  <Button size="sm" variant="primary" onClick={() => router.push(`/app/courses/${outline.courseId}?focus=${c.id}`)}>
-                    Study this
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="primary" onClick={() => router.push(`/app/courses/${outline.courseId}?focus=${c.id}`)}>
+                      Study this
+                    </Button>
+                    {c.struggling && (
+                      <Button size="sm" variant="quiet" busy={breakingId === c.id} disabled={breakingId !== null} onClick={() => breakIntoSteps(c.id)}>
+                        Break into simpler steps
+                      </Button>
+                    )}
+                  </div>
+                  {conceptError?.conceptId === c.id && (
+                    <InlineError message={conceptError.message} onRetry={() => breakIntoSteps(c.id)} retrying={breakingId === c.id} />
+                  )}
                 </div>
               )}
             </li>

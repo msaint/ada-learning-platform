@@ -47,6 +47,7 @@ export type ConceptState = {
   reviewItemId: string | null;
   display: DisplayStatus;
   inPlan: boolean;
+  needsFactCheck: boolean;
   evidenceCount: number;
   needsRecall: boolean;
   history: PlannerConcept["history"];
@@ -69,7 +70,7 @@ export async function loadActiveGoal(t: Db, course: CourseRow): Promise<GoalRow>
 }
 
 export async function loadPlan(t: Db, courseId: string) {
-  const [p] = await t<{ version: number; plan_json: { required_slugs?: string[]; direction?: string; explanation?: string }; reason: string }[]>`
+  const [p] = await t<{ version: number; plan_json: { required_slugs?: string[]; fact_check_slugs?: string[]; direction?: string; explanation?: string }; reason: string }[]>`
     select version, plan_json, reason from course_curriculum_versions where course_id = ${courseId} order by version desc limit 1`;
   return p ?? { version: 0, plan_json: {}, reason: "" };
 }
@@ -78,6 +79,7 @@ export async function loadPlan(t: Db, courseId: string) {
 export async function loadConceptStates(t: Db, courseId: string, now = new Date()): Promise<ConceptState[]> {
   const plan = await loadPlan(t, courseId);
   const required = new Set(plan.plan_json.required_slugs ?? []);
+  const factCheck = new Set(plan.plan_json.fact_check_slugs ?? []);
   const concepts = await t<
     {
       id: string;
@@ -139,6 +141,7 @@ export async function loadConceptStates(t: Db, courseId: string, now = new Date(
       reviewItemId: c.review_item_id,
       display: displayStatus(mastery, c.due_at, now),
       inPlan: required.size === 0 || required.has(c.slug),
+      needsFactCheck: factCheck.has(c.slug),
       evidenceCount: e?.n ?? 0,
       history: {
         explained: h?.explained ?? false,

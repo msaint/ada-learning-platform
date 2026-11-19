@@ -45,6 +45,28 @@ describe("FeedbackPanel", () => {
     expect(screen.getByText("(with help)")).toBeTruthy();
     expect(screen.getByText(/Names the cause/)).toBeTruthy();
   });
+
+  it("offers a quiet grading flag on non-correct free responses and confirms once flagged", async () => {
+    const onFlag = vi.fn();
+    const { rerender } = render(
+      <FeedbackPanel
+        activityKind="free_response"
+        onFlag={onFlag}
+        feedback={{ status: "graded", result: "incorrect", independence: "independent", feedbackMarkdown: "Missing the second step." }}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "That felt misgraded" }));
+    expect(onFlag).toHaveBeenCalledTimes(1);
+    rerender(
+      <FeedbackPanel
+        activityKind="free_response"
+        onFlag={onFlag}
+        feedback={{ status: "graded", result: "incorrect", independence: "independent", feedbackMarkdown: "Missing the second step.", flagged: true }}
+      />,
+    );
+    expect(screen.getByText("Thanks — flagged for review.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "That felt misgraded" })).toBeNull();
+  });
 });
 
 describe("Markdown", () => {
@@ -55,5 +77,13 @@ describe("Markdown", () => {
     const links = [...container.querySelectorAll("a")];
     expect(links.map((a) => a.getAttribute("href"))).toEqual(["https://example.com"]);
     expect(links[0].getAttribute("rel")).toContain("noopener");
+  });
+
+  it("renders LaTeX math with KaTeX and highlights fenced code blocks safely", () => {
+    const sample = "Formula: $E = mc^2$\n\n```ts\nconst answer = 42;\n```";
+    const { container } = render(<Markdown>{sample}</Markdown>);
+    expect(container.querySelector(".katex")).not.toBeNull();
+    expect(container.querySelector("pre code.hljs")).not.toBeNull();
+    expect(container.querySelector("script")).toBeNull();
   });
 });

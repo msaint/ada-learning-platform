@@ -1,11 +1,11 @@
-import type { DisplayStatus } from "./mastery";
+import type { MasteryStatus } from "./mastery";
 
 export type ReadinessBand = "unknown" | "early" | "developing" | "approaching" | "demonstrated";
 
 export type ReadinessConcept = {
   slug: string;
   title: string;
-  status: DisplayStatus;
+  status: MasteryStatus;
   importance: number;
   prerequisites: string[];
   evidenceCount: number;
@@ -26,7 +26,7 @@ export function estimateReadiness(
   if (required.length === 0 || evidenceCount < MIN_EVIDENCE_FOR_ESTIMATE) {
     return { band: "unknown", basis: "Not enough evidence yet. Answer a few questions and Ada will estimate readiness.", evidenceCount };
   }
-  const isShown = (s: DisplayStatus) => s === "demonstrated" || s === "review_due";
+  const isShown = (s: MasteryStatus) => s === "demonstrated";
   const core = required.filter((c) => c.importance >= 2);
   const pool = core.length ? core : required;
   const shown = pool.filter((c) => isShown(c.status));

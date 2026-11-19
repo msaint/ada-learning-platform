@@ -9,7 +9,7 @@ export const POST = publicRoute(
     if (user) return ok({ user: { id: user.id, isGuest: user.isGuest } });
     const guest = await createGuest({ ipHash: ipHash(clientIp(req)), timezone: body.timezone, maxPerHourPerIp: env().ADA_GUEST_CREATIONS_PER_HOUR });
     const s = await createSession(guest.id, GUEST_DAYS);
-    return ok({ user: { id: guest.id, isGuest: true } }, { status: 201, headers: { "set-cookie": sessionCookie(s.token, s.expiresAt) } });
+    return ok({ user: { id: guest.id, isGuest: true } }, { status: 201, headers: { "set-cookie": sessionCookie(s.token, s.expiresAt, req) } });
   },
   { body: GuestBody },
 );

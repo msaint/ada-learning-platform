@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import type { ActivityFeedback, LearnerActivity } from "@/lib/schemas/dto";
 import { Markdown } from "@/components/ui/markdown";
+import { Button } from "@/components/ui/primitives";
 
 const TITLE: Record<string, string> = {
   correct: "Correct",
@@ -10,9 +11,20 @@ const TITLE: Record<string, string> = {
   exposure: "Noted",
 };
 
-export function FeedbackPanel({ feedback: f, activityKind }: { feedback: ActivityFeedback; activityKind: LearnerActivity["kind"] }) {
+export function FeedbackPanel({
+  feedback: f,
+  activityKind,
+  onFlag,
+  flagging = false,
+}: {
+  feedback: ActivityFeedback;
+  activityKind: LearnerActivity["kind"];
+  onFlag?: () => void;
+  flagging?: boolean;
+}) {
   const tone =
     f.status === "pending_evaluation" ? "neutral" : f.result === "correct" ? "good" : f.result === "incorrect" ? "bad" : f.result === "partial" || f.result === "uncertain" ? "warn" : "neutral";
+  const canFlag = activityKind === "free_response" && f.status === "graded" && !f.skipped && f.result !== "correct" && f.result !== "exposure";
   return (
     <section
       aria-live="polite"
@@ -58,6 +70,17 @@ export function FeedbackPanel({ feedback: f, activityKind }: { feedback: Activit
             <Markdown compact>{f.exampleAnswer}</Markdown>
           </div>
         </details>
+      )}
+      {canFlag && (f.flagged || onFlag) && (
+        <div className="mt-3">
+          {f.flagged ? (
+            <p className="text-xs text-muted">Thanks — flagged for review.</p>
+          ) : (
+            <Button size="sm" variant="quiet" onClick={onFlag} busy={flagging} className="-ml-2 text-xs text-muted hover:text-ink">
+              That felt misgraded
+            </Button>
+          )}
+        </div>
       )}
     </section>
   );

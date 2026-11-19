@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const EnvSchema = z.object({
-  DATABASE_URL: z.string().url(),
+  DATABASE_URL: z.string().url().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -46,8 +46,8 @@ const EnvSchema = z.object({
   EMAIL_TRANSPORT: z.enum(["resend", "memory"]).default("resend"),
   /** Shared secret for scheduled jobs (Vercel Cron sends it as a Bearer token). */
   CRON_SECRET: z.string().min(16).optional(),
-  /** Let Claude search the web while writing explanations, and show the sources: on | off. */
-  ADA_WEB_GROUNDING: z.enum(["on", "off"]).default("off"),
+  /** Let Claude search the web while writing explanations, and show the sources: on | auto | off. */
+  ADA_WEB_GROUNDING: z.enum(["on", "auto", "off"]).default("off"),
   NODE_ENV: z.string().default("development"),
 });
 
@@ -59,6 +59,7 @@ export function env(): Env {
   if (cached) return cached;
   const parsed = EnvSchema.safeParse({
     ...process.env,
+    DATABASE_URL: process.env.DATABASE_URL || undefined,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || undefined,
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || undefined,
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || undefined,
@@ -77,9 +78,6 @@ export function env(): Env {
     throw new Error(`Invalid environment configuration: ${issues}`);
   }
   const d = parsed.data;
-  if (!d.MOCK_MODEL && !d.OPENAI_API_KEY && !d.ANTHROPIC_API_KEY && d.NODE_ENV === "production") {
-    throw new Error("Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY in production (MOCK_MODEL is for development/tests only).");
-  }
   if (d.ADA_MODEL_PROVIDER === "openai" && !d.OPENAI_API_KEY && !d.MOCK_MODEL) throw new Error("ADA_MODEL_PROVIDER=openai but OPENAI_API_KEY is not set.");
   if (d.ADA_MODEL_PROVIDER === "anthropic" && !d.ANTHROPIC_API_KEY && !d.MOCK_MODEL) throw new Error("ADA_MODEL_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set.");
   cached = parsed.data;

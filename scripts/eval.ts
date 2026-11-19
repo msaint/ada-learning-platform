@@ -4,6 +4,7 @@
  *   npm run eval:model                              # both parts, configured provider
  *   npm run eval:model -- --provider anthropic      # one provider in isolation (no fallback)
  *   npm run eval:model -- --part grading --reps 3   # only the hand-labelled grading cases, each graded 3 times
+ *   npm run eval:model -- --part grading --split holdout  # held-out grading split only
  *   npm run eval:model -- --part generation --limit 3
  *   npm run eval:model -- --run my-run              # name the run (re-running the same name resumes it)
  *
@@ -45,6 +46,7 @@ const { env } = await import("../src/lib/env");
 type ModelInfo = import("../src/lib/ai/model-adapter").ModelInfo;
 
 const part = flag("part") ?? "all";
+const split = (flag("split") ?? "all") as "all" | "train" | "holdout";
 const limit = flag("limit") ? Number(flag("limit")) : Infinity;
 const concurrency = Number(flag("concurrency") ?? 4);
 const reps = Number(flag("reps") ?? 1);
@@ -108,16 +110,16 @@ type GradingCase = {
   answers: { id: string; expected: string[]; kind: string; text: string }[];
 };
 
-async function gradeOne(c: GradingCase, a: GradingCase["answers"][number]): Promise<Row> {
+async function gradeOne(c: GradingCase, a: GradingCase["answers"][number], splitName: "train" | "holdout"): Promise<Row> {
   const calls: Call[] = [];
   const r = await model.evaluateAnswer({ topic: c.topic, concept: c.concept, promptMarkdown: c.promptMarkdown, rubric: c.rubric, idealAnswer: c.idealAnswer, response: a.text, withholdAnswer: true });
   calls.push(callOf(r.info));
   const got = r.value.result;
   return {
-    key: `grading:${c.id}:${a.id}`,
+    key: `grading:${splitName}:${c.id}:${a.id}`,
     part: "grading",
-    id: `${c.id}/${a.id}`,
-    tags: [a.expected[0], a.kind],
+    id: `${splitName}/${c.id}/${a.id}`,
+    tags: [a.expected[0], a.kind, splitName],
     calls,
     data: {
       question: c.promptMarkdown,
@@ -235,10 +237,20 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
 
 const jobs: { key: string; run: () => Promise<Row> }[] = [];
 if (part === "all" || part === "grading") {
-  const cases = (JSON.parse(readFileSync(join(root, "grading-cases.json"), "utf8")) as GradingCase[]).slice(0, limit);
-  // Grading the same answer several times (--reps) separates real leniency from run-to-run noise.
-  for (let rep = 0; rep < reps; rep++)
-    for (const c of cases) for (const a of c.answers) jobs.push({ key: `grading:${c.id}:${a.id}${rep ? `:r${rep}` : ""}`, run: async () => ({ ...(await gradeOne(c, a)), key: `grading:${c.id}:${a.id}${rep ? `:r${rep}` : ""}` }) });
+  const loadSplit = (file: string, splitName: "train" | "holdout") => {
+    const p = join(root, file);
+    if (!existsSync(p)) return;
+    const cases = (JSON.parse(readFileSync(p, "utf8")) as GradingCase[]).slice(0, limit);
+    // Grading the same answer several times (--reps) separates real leniency from run-to-run noise.
+    for (let rep = 0; rep < reps; rep++)
+      for (const c of cases)
+        for (const a of c.answers) {
+          const key = `grading:${splitName}:${c.id}:${a.id}${rep ? `:r${rep}` : ""}`;
+          jobs.push({ key, run: async () => ({ ...(await gradeOne(c, a, splitName)), key }) });
+        }
+  };
+  if (split === "all" || split === "train") loadSplit("grading-cases.json", "train");
+  if (split === "all" || split === "holdout") loadSplit("grading-cases-holdout.json", "holdout");
 }
 if (part === "all" || part === "generation") {
   const topics = (JSON.parse(readFileSync(join(root, "topics.json"), "utf8")) as { id: string; topic: string; tags: string[] }[]).slice(0, limit);
@@ -283,8 +295,6 @@ function rate(items: Row[], pred: (d: Record<string, unknown>) => boolean) {
   return { k, n, pct: Math.round(p * 100), text: `${k}/${n} (${pc(p)}%, 95% CI ${pc(centre - half)}–${pc(centre + half)}%)` };
 }
 const is = (field: string) => (d: Record<string, unknown>) => d[field] === true;
-const expecting = (v: string) => grading.filter((r) => (r.data.expected as string[])[0] === v);
-const notCorrect = grading.filter((r) => !(r.data.expected as string[]).includes("correct"));
 
 const allCalls = rows.flatMap((r) => r.calls);
 const unknownModels = new Set<string>();
@@ -300,17 +310,27 @@ const byOp = [...new Set(allCalls.filter((c) => !c.judge).map((c) => c.op))].map
   return { op, models: [...new Set(cs.map((c) => c.model))].join(", "), calls: cs.length, p50s: quantile(cs.map((c) => c.latencyMs), 0.5) / 1000, p90s: quantile(cs.map((c) => c.latencyMs), 0.9) / 1000, repaired: cs.filter((c) => c.repaired).length, outTokens: Math.round(cs.reduce((s, c) => s + c.outputTokens, 0) / cs.length) };
 });
 
+const gradingTrain = grading.filter((r) => r.tags[2] !== "holdout");
+const gradingHoldout = grading.filter((r) => r.tags[2] === "holdout");
+const gradingSummary = (subset: Row[]) => {
+  const exp = (v: string) => subset.filter((r) => (r.data.expected as string[])[0] === v);
+  const notOk = subset.filter((r) => !(r.data.expected as string[]).includes("correct"));
+  return {
+    agreement: rate(subset, is("agrees")),
+    falsePass: rate(notOk, is("falsePass")),
+    falseFail: rate(exp("correct"), is("falseFail")),
+    correctRecognised: rate(exp("correct"), (d) => d.got === "correct"),
+    partialRecognised: rate(exp("partial"), (d) => d.got === "partial"),
+    incorrectRecognised: rate(exp("incorrect"), (d) => d.got === "incorrect"),
+    injectionResisted: rate(subset.filter((r) => r.tags[1] === "prompt injection"), (d) => d.got !== "correct"),
+    uncertain: rate(subset, (d) => d.got === "uncertain"),
+  };
+};
+
 const metrics = {
-  grading: {
-    agreement: rate(grading, is("agrees")),
-    falsePass: rate(notCorrect, is("falsePass")),
-    falseFail: rate(expecting("correct"), is("falseFail")),
-    correctRecognised: rate(expecting("correct"), (d) => d.got === "correct"),
-    partialRecognised: rate(expecting("partial"), (d) => d.got === "partial"),
-    incorrectRecognised: rate(expecting("incorrect"), (d) => d.got === "incorrect"),
-    injectionResisted: rate(grading.filter((r) => r.tags[1] === "prompt injection"), (d) => d.got !== "correct"),
-    uncertain: rate(grading, (d) => d.got === "uncertain"),
-  },
+  grading: gradingSummary(grading),
+  gradingTrain: gradingTrain.length ? gradingSummary(gradingTrain) : undefined,
+  gradingHoldout: gradingHoldout.length ? gradingSummary(gradingHoldout) : undefined,
   /** Answers whose repeated gradings (with --reps) did not all give the same verdict. */
   gradingUnstable: (() => {
     const byAnswer = new Map<string, Set<unknown>>();
@@ -363,6 +383,10 @@ if (grading.length) {
   md.push(`| Incorrect answers recognised as incorrect | ${g.incorrectRecognised.text} |`);
   md.push(`| Prompt-injection answers not marked correct | ${g.injectionResisted.text} |`);
   md.push(`| Verdict "uncertain" | ${g.uncertain.text} |`, "");
+  if (metrics.gradingTrain && metrics.gradingHoldout) {
+    md.push(`- **Tuning split:** ${metrics.gradingTrain.agreement.text} agreement · false pass ${metrics.gradingTrain.falsePass.text}`);
+    md.push(`- **Held-out split:** ${metrics.gradingHoldout.agreement.text} agreement · false pass ${metrics.gradingHoldout.falsePass.text}`, "");
+  }
   if (reps > 1) md.push(`Each answer was graded ${reps} times. ${metrics.gradingUnstable.unstable.length} of ${metrics.gradingUnstable.answers} answers got different verdicts on different tries${metrics.gradingUnstable.unstable.length ? `: ${metrics.gradingUnstable.unstable.join(", ")}` : ""}. Counts above are per grading, so the intervals are a little optimistic.`, "");
   const wrong = grading.filter((r) => !r.data.agrees);
   md.push(`### Disagreements (${wrong.length})`, "");

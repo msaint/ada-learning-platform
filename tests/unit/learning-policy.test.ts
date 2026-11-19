@@ -109,9 +109,15 @@ describe("readiness", () => {
     const r = estimateReadiness([c("a", "not_assessed", 2), c("b", "demonstrated", 2, 2, ["a"]), c("x", "demonstrated")]);
     expect(r.basis).toMatch(/Prerequisite still to show: a/);
   });
+  it("never inflates developing concepts into demonstrated even if a review is overdue", () => {
+    // Only underlying MasteryStatus ("demonstrated") counts; "developing" does not.
+    const r = estimateReadiness([c("a", "developing", 3), c("b", "developing", 3)], { finalAssessmentPassed: true });
+    expect(r.band).toBe("developing");
+    expect(r.basis).toMatch(/0 of 2/);
+  });
 });
 
-const concept = (slug: string, prerequisites: string[] = []) => ({ slug, title: slug.toUpperCase(), description: "d", assessment_criteria: ["can explain"], importance: 2, prerequisites });
+const concept = (slug: string, prerequisites: string[] = []) => ({ slug, title: slug.toUpperCase(), description: "d", assessment_criteria: ["can explain"], importance: 2, prerequisites, needs_fact_check: false });
 const proposal = (concepts: CurriculumProposal["concepts"], first = concepts[0]?.slug ?? "x"): CurriculumProposal =>
   CurriculumProposalSchema.parse({ title: "T", direction: "D", concepts, first_concept_slug: first, success_criteria: [] });
 
@@ -141,20 +147,34 @@ describe("curriculum validation", () => {
   it("topoOrder returns null on cycles", () => {
     expect(topoOrder([{ slug: "a", prerequisites: ["b"] }, { slug: "b", prerequisites: ["a"] }])).toBeNull();
   });
-  it("expansion rejects slug collisions and unknown anchors", () => {
+  it("expansion rejects slug collisions and unknown anchors, and supports scaffold mode", () => {
     const base = { anchor_slug: null, keep_slugs: [], direction: "", success_criteria: [], explanation: "" };
     expect(validateExpansion({ ...base, new_concepts: [concept("a")] }, ["a"], "branch").ok).toBe(false);
     expect(validateExpansion({ ...base, anchor_slug: "nope", new_concepts: [concept("x")] }, ["a"], "branch").ok).toBe(false);
     expect(validateExpansion({ ...base, new_concepts: [concept("x", ["a"])] }, ["a"], "branch").ok).toBe(true);
+    expect(validateExpansion({ ...base, anchor_slug: "a", new_concepts: [concept("prep-a")] }, ["a"], "scaffold").ok).toBe(true);
+    expect(validateExpansion({ ...base, anchor_slug: "a", new_concepts: [] }, ["a"], "scaffold").ok).toBe(false);
+  });
+  it("defaults needs_fact_check to false when omitted", () => {
+    const raw = (slug: string) => ({ slug, title: slug.toUpperCase(), description: "d", assessment_criteria: ["can explain"], importance: 2, prerequisites: [] });
+    const p = CurriculumProposalSchema.parse({ title: "T", direction: "D", concepts: [raw("a"), raw("b"), raw("c")], first_concept_slug: "a", success_criteria: [] });
+    expect(p.concepts.every((x) => x.needs_fact_check === false)).toBe(true);
   });
 });
 
 describe("activity schema", () => {
-  it("rejects MC whose answer isn't a choice or with duplicate choices", () => {
+  it("rejects MC whose answer isn't a choice or with duplicate choices, and accepts optional reasoning", () => {
     const base = { kind: "multiple_choice", promptMarkdown: "Q", rationale: "R", difficulty: 1 };
     expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "3" }], correctChoiceId: "z" }).success).toBe(false);
     expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "1" }, { id: "c", text: "3" }], correctChoiceId: "a" }).success).toBe(false);
     expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "3" }], correctChoiceId: "a" }).success).toBe(true);
+    const withReasoning = MultipleChoiceGenSchema.safeParse({
+      ...base,
+      choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "3" }],
+      reasoning: "1 is the smallest positive integer, so a is uniquely right.",
+      correctChoiceId: "a",
+    });
+    expect(withReasoning.success).toBe(true);
   });
 });
 

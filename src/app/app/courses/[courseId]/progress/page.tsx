@@ -3,6 +3,7 @@ import { requirePageUser } from "@/lib/auth/server";
 import { getProgress } from "@/lib/services/courses";
 import { BAND_LABEL } from "@/lib/learning/readiness";
 import { StatusBadge } from "@/components/course/status-badge";
+import { ExploreBranchButton } from "@/components/course/explore-branch-button";
 
 export const dynamic = "force-dynamic";
 
@@ -106,9 +107,12 @@ export default async function ProgressPage({ params }: { params: Promise<{ cours
           )}
           {p.curiosity.openQuestions.length > 0 && (
             <Section title="Your open questions">
-              <ul className="list-disc space-y-1 pl-5 text-sm text-ink-soft">
+              <ul className="space-y-2 text-sm text-ink-soft">
                 {p.curiosity.openQuestions.map((q, i) => (
-                  <li key={i} className="break-words">{q}</li>
+                  <li key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3.5 py-2">
+                    <span className="min-w-0 flex-1 break-words">{q}</span>
+                    {q.trim().length >= 2 && <ExploreBranchButton courseId={courseId} question={q} />}
+                  </li>
                 ))}
               </ul>
             </Section>

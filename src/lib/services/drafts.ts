@@ -371,8 +371,9 @@ export async function convertDraft(ownerId: string, draftId: string): Promise<{ 
       returning id`;
     await t`update courses set active_goal_version_id = ${goal.id} where id = ${course.id}`;
     const ids = await insertConcepts(t, course.id, plan.concepts, 0, "initial");
+    const factCheckSlugs = plan.concepts.filter((c) => c.needs_fact_check).map((c) => c.slug);
     await t`insert into course_curriculum_versions (course_id, version, plan_json, reason, model_info_json)
-      values (${course.id}, 1, ${json({ direction: plan.direction, required_slugs: plan.concepts.map((c) => c.slug), first_concept_slug: plan.first_concept_slug, cadence_note: plan.cadence_note, suggested_minutes_weekly: plan.suggested_minutes_weekly })}, 'initial', ${json(modelInfo)})`;
+      values (${course.id}, 1, ${json({ direction: plan.direction, required_slugs: plan.concepts.map((c) => c.slug), fact_check_slugs: factCheckSlugs, first_concept_slug: plan.first_concept_slug, cadence_note: plan.cadence_note, suggested_minutes_weekly: plan.suggested_minutes_weekly })}, 'initial', ${json(modelInfo)})`;
     for (const src of row.state_json.sources ?? []) {
       if (!/^https?:\/\//i.test(src.url)) continue;
       await t`insert into source_references (course_id, title, url, retrieved_at, source_type)
