@@ -177,15 +177,171 @@ export async function previousAnswer(t: Db, sessionId: string, conceptId: string
   return { promptMarkdown: promptOf(spec).slice(0, 1500), learnerAnswer: learnerAnswer.slice(0, 2000), answerKey, misconception: r.feedback_json?.misconception ?? null };
 }
 
-/** Shuffles choices once at generation (persisted, so a reload shows the same order) and relabels ids a–e. */
+const DETERMINER_BEFORE_NOUN =
+  /\b(?:a|an|the|this|that|each|every|another|any|no|one|some|what|which|whose|my|your|his|her|its|our|their|first|second|third|fourth|fifth|last|next|only|other|same|right|wrong|correct|incorrect|good|bad|better|best|worse|worst|valid|invalid|strong|weak|tempting|plausible|single|[a-z]+'s|[a-z]+’s)\s+$/i;
+
+const VERB_PREFIX_BEFORE_ANSWER =
+  /\b(?:to|not|can|cannot|can't|will|won't|would|wouldn't|should|shouldn't|could|couldn't|must|may|might|do|does|did|doesn't|don't|didn't|help|helps|helped|helping|try|tries|tried|trying)\s+$/i;
+
+const BARE_LOWER_A_COPULA_OR_PUNCT =
+  /^(?:$|[.,;:!?)\]\-—–]|['’]s\b|\s+(?:is|isn't|are|aren't|was|wasn't|were|weren't|has|hasn't|have|haven't|had|does|doesn't|do|don't|did|didn't|can|can't|cannot|could|couldn't|will|won't|would|wouldn't|should|shouldn't|may|might|must|correctly|incorrectly|wrongly|rightly|accurately|inaccurately|falsely|mistakenly|erroneously|only|merely|simply|just|actually|instead|also|still|both|neither)\b)/i;
+
+const NON_VERB_S_NOUN =
+  /^(?:pass|class|glass|mass|grass|brass|loss|cross|boss|gross|process|success|access|excess|address|progress|stress|press|dress|guess|mess|less|ness|focus|status|bonus|campus|virus|census|consensus|corpus|apparatus|stimulus|syllabus|radius|genius|plus|bus|gas|bias|alias|atlas|canvas|basis|crisis|analysis|hypothesis|synthesis|thesis|diagnosis|emphasis|axis|series|species|lens|means|news)$/i;
+
+function isBareLowerALabelFollower(after: string): boolean {
+  if (BARE_LOWER_A_COPULA_OR_PUNCT.test(after)) return true;
+  // Indefinite article "a" can never precede a plural noun or 3rd-person singular "-s" verb (excluding singular -ss/-us/-is/-os/-ics nouns).
+  const w = after.match(/^\s+([a-z]+)\b/)?.[1];
+  return Boolean(w && w.length >= 4 && w.endsWith("s") && !/(?:ss|us|is|os|ics)$/i.test(w) && !NON_VERB_S_NOUN.test(w));
+}
+
+type ParsedLabelToken = {
+  mapped: string;
+  end: number;
+  isBareLowerA: boolean;
+  format: (n: string) => string;
+};
+
+function readLabelToken(str: string, pos: number, labelMap: ReadonlyMap<string, string>): ParsedLabelToken | null {
+  const slice = str.slice(pos);
+  const patterns: { re: RegExp; format: (n: string) => string; bare?: boolean }[] = [
+    { re: /^\*\*([A-Za-z0-9]{1,4})\*\*/, format: (n) => `**${n}**` },
+    { re: /^`([A-Za-z0-9]{1,4})`/, format: (n) => `\`${n}\`` },
+    { re: /^\(([A-Za-z0-9]{1,4})\)/, format: (n) => n },
+    { re: /^'([A-Za-z0-9]{1,4})'/, format: (n) => n },
+    { re: /^"([A-Za-z0-9]{1,4})"/, format: (n) => n },
+    { re: /^([A-Za-z0-9]{1,4})(?![A-Za-z0-9_/])/, format: (n) => n, bare: true },
+  ];
+  for (const { re, format, bare } of patterns) {
+    const m = slice.match(re);
+    if (!m) continue;
+    const mapped = labelMap.get(m[1].toLowerCase());
+    if (!mapped) return null;
+    return {
+      mapped,
+      end: pos + m[0].length,
+      isBareLowerA: Boolean(bare && m[0] === "a"),
+      format,
+    };
+  }
+  return null;
+}
+
+function remapStandaloneParenGap(gap: string, labelMap: ReadonlyMap<string, string>): string {
+  return gap.replace(/(^|[.;:\n]\s*)\(([a-e])\)(?=\s+(?:is|was)\s+(?:correct|incorrect|right|wrong|the\s+correct|not\s+correct)\b)/g, (full, lead: string, id: string) => {
+    const mapped = labelMap.get(id.toLowerCase());
+    return mapped ? `${lead}(${mapped})` : full;
+  });
+}
+
+/**
+ * Rewrites pre-shuffle option label references in `rationale` (e.g. "Option c",
+ * "Options a and b", "Choice (d)") in a single left-to-right pass so they match
+ * the 1-based UI badge numbers (1–N) after `shuffleChoices` reorders options.
+ */
+export function remapRationaleLabels(rationale: string, labelMap: ReadonlyMap<string, string>, promptMarkdown = ""): string {
+  if (!rationale || labelMap.size === 0) return rationale;
+  // Leave scenario-defined "Option A ... Option B" stems untouched.
+  if (/\boption\s+a\b[\s\S]*\boption\s+b\b/i.test(promptMarkdown) || /\bchoice\s+a\b[\s\S]*\bchoice\s+b\b/i.test(promptMarkdown)) {
+    return rationale;
+  }
+
+  const keywordRe = /\b(Options?|Choices?|Answers?)\s+/gi;
+  let out = "";
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = keywordRe.exec(rationale)) !== null) {
+    if (m.index < cursor) continue;
+    const keyword = m[1];
+    const afterKeywordPos = m.index + m[0].length;
+    const first = readLabelToken(rationale, afterKeywordPos, labelMap);
+    if (!first) continue;
+
+    const isPlural = /s$/i.test(keyword);
+    const isAnswerWord = /^answers?$/i.test(keyword);
+    const isCapOptionOrChoice = /^(?:Option|Choice)$/.test(keyword);
+
+    const chain: { sep: string; tok: ParsedLabelToken }[] = [{ sep: "", tok: first }];
+    let scanPos = first.end;
+    for (;;) {
+      const sepMatch = rationale.slice(scanPos).match(/^(?:,\s*(?:and|or)\s+|,\s+|\s+(?:and|or|&)\s+)/i);
+      if (!sepMatch) break;
+      const nextPos = scanPos + sepMatch[0].length;
+      const nextTok = readLabelToken(rationale, nextPos, labelMap);
+      if (!nextTok) break;
+      if (nextTok.isBareLowerA && !isPlural && !isBareLowerALabelFollower(rationale.slice(nextTok.end))) break;
+      chain.push({ sep: sepMatch[0], tok: nextTok });
+      scanPos = nextTok.end;
+    }
+
+    if (first.isBareLowerA && !isPlural) {
+      const prefix = rationale.slice(0, m.index);
+      if (DETERMINER_BEFORE_NOUN.test(prefix)) continue;
+      if (isAnswerWord && VERB_PREFIX_BEFORE_ANSWER.test(prefix)) continue;
+      if (!isCapOptionOrChoice && chain.length === 1 && !isBareLowerALabelFollower(rationale.slice(first.end))) continue;
+    }
+
+    out += remapStandaloneParenGap(rationale.slice(cursor, afterKeywordPos), labelMap);
+    for (const { sep, tok } of chain) {
+      out += sep + tok.format(tok.mapped);
+    }
+    cursor = scanPos;
+    keywordRe.lastIndex = cursor;
+  }
+
+  out += remapStandaloneParenGap(rationale.slice(cursor), labelMap);
+  return out;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripChoicePrefixes(choices: { id: string; text: string }[]): { id: string; text: string }[] {
+  const perChoiceRegex = choices.map((c, i) => {
+    const idEsc = escapeRegExp(c.id.trim());
+    const num = i + 1;
+    return {
+      paren: new RegExp(`^\\((?:${idEsc}|${num})\\)\\s+`, "i"),
+      dotted: new RegExp(`^(?:${idEsc}|${num})[).:]\\s+`, "i"),
+    };
+  });
+  const allHavePrefix = choices.every((c, i) => perChoiceRegex[i].paren.test(c.text) || perChoiceRegex[i].dotted.test(c.text));
+  const stripped = choices.map((c, i) => {
+    if (perChoiceRegex[i].paren.test(c.text)) return c.text.replace(perChoiceRegex[i].paren, "").trim();
+    if (allHavePrefix && perChoiceRegex[i].dotted.test(c.text)) return c.text.replace(perChoiceRegex[i].dotted, "").trim();
+    return c.text;
+  });
+  if (stripped.some((t) => !t) || new Set(stripped.map((t) => t.toLowerCase())).size !== stripped.length) return choices;
+  return choices.map((c, i) => ({ id: c.id, text: stripped[i] }));
+}
+
+/**
+ * Shuffles choices once at generation (persisted, so a reload shows the same order),
+ * relabels choice ids a–e, and remaps any option-label references in `rationale`
+ * to match the post-shuffle 1-based UI option numbers.
+ */
 export function shuffleChoices(spec: Extract<ActivitySpec, { kind: "multiple_choice" }>, rand: (n: number) => number = (n) => randomInt(n)) {
-  const choices = [...spec.choices];
+  const cleaned = stripChoicePrefixes(spec.choices).map((c, origIdx) => ({ ...c, origIdx }));
+  const choices = [...cleaned];
   for (let i = choices.length - 1; i > 0; i--) {
     const j = rand(i + 1);
     [choices[i], choices[j]] = [choices[j], choices[i]];
   }
   const ids = ["a", "b", "c", "d", "e"];
-  const relabeled = choices.map((c, i) => ({ id: ids[i], text: c.text, _orig: c.id }));
+  const relabeled = choices.map((c, i) => ({ id: ids[i], text: c.text, _orig: c.id, _origIdx: c.origIdx }));
   const correct = relabeled.find((c) => c._orig === spec.correctChoiceId)!.id;
-  return { ...spec, choices: relabeled.map(({ id, text }) => ({ id, text })), correctChoiceId: correct };
+
+  const labelMap = new Map<string, string>();
+  relabeled.forEach((c, newIdx) => {
+    labelMap.set(String(c._origIdx + 1), String(newIdx + 1));
+  });
+  relabeled.forEach((c, newIdx) => {
+    labelMap.set(c._orig.trim().toLowerCase(), String(newIdx + 1));
+  });
+
+  const rationale = remapRationaleLabels(spec.rationale, labelMap, spec.promptMarkdown);
+  return { ...spec, choices: relabeled.map(({ id, text }) => ({ id, text })), correctChoiceId: correct, rationale };
 }

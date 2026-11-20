@@ -163,10 +163,13 @@ describe("curriculum validation", () => {
 });
 
 describe("activity schema", () => {
-  it("rejects MC whose answer isn't a choice or with duplicate choices, and accepts optional reasoning", () => {
+  it("rejects MC whose answer isn't a choice, duplicate choices, or order-dependent choices, and accepts optional reasoning", () => {
     const base = { kind: "multiple_choice", promptMarkdown: "Q", rationale: "R", difficulty: 1 };
     expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "3" }], correctChoiceId: "z" }).success).toBe(false);
     expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "1" }, { id: "c", text: "3" }], correctChoiceId: "a" }).success).toBe(false);
+    expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "All of the above" }], correctChoiceId: "c" }).success).toBe(false);
+    expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "None of the above." }], correctChoiceId: "c" }).success).toBe(false);
+    expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "Both A and B" }], correctChoiceId: "c" }).success).toBe(false);
     expect(MultipleChoiceGenSchema.safeParse({ ...base, choices: [{ id: "a", text: "1" }, { id: "b", text: "2" }, { id: "c", text: "3" }], correctChoiceId: "a" }).success).toBe(true);
     const withReasoning = MultipleChoiceGenSchema.safeParse({
       ...base,

@@ -104,11 +104,16 @@ export const MultipleChoiceGenSchema = z
     choices: z
       .array(z.object({ id: z.string().trim().min(1).max(20), text: shortText(300) }))
       .min(3)
-      .max(5),
+      .max(5)
+      .describe(
+        "Self-contained answer options. Choices are randomly shuffled and numbered 1–N in the UI, so do NOT prefix text with letters/numbers and NEVER use position-dependent options like 'All of the above', 'None of the above', or 'Both A and B'.",
+      ),
     /** Private chain-of-thought solved before picking correctChoiceId (never sent to the learner). */
     reasoning: z.string().trim().max(800).optional(),
     correctChoiceId: z.string().trim().min(1).max(20),
-    rationale: shortText(1500),
+    rationale: shortText(1500).describe(
+      "Explanation of why the correct answer is right and why tempting distractors are wrong. Choices are shuffled and shown as 1–N (not letters) in the UI, so NEVER refer to choices by letter, number, or position (e.g. never write 'Option c', 'Choice A', '(b)', or 'the second option'); refer to options by their content/idea.",
+    ),
     difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   })
   .superRefine((v, ctx) => {
@@ -117,6 +122,9 @@ export const MultipleChoiceGenSchema = z
     if (!ids.includes(v.correctChoiceId)) ctx.addIssue({ code: "custom", message: "correctChoiceId must match a choice id" });
     const texts = v.choices.map((c) => c.text.toLowerCase());
     if (new Set(texts).size !== texts.length) ctx.addIssue({ code: "custom", message: "choices must be distinct" });
+    if (v.choices.some((c) => /^(?:all|none)\s+of\s+the\s+(?:above|below)\b/i.test(c.text) || /\b(?:both|either|neither)\s+[a-e]\s+(?:and|or|nor)\s+[a-e]\b/i.test(c.text))) {
+      ctx.addIssue({ code: "custom", message: "choices are shuffled and must not depend on option order or letters (e.g. no 'All of the above' or 'Both A and B')" });
+    }
   });
 
 export const FreeResponseGenSchema = z.object({

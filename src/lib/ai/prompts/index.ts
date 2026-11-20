@@ -125,7 +125,7 @@ Requirements: keep_slugs = existing concepts still relevant to the NEW goal. new
 
 const KIND_GUIDE: Record<string, string> = {
   explanation: `kind "explanation": bodyMarkdown is a focused mini-lesson (150–350 words) on the concept with one short worked example or vivid concrete case. Optional title and continueLabel.`,
-  multiple_choice: `kind "multiple_choice": promptMarkdown is a question; 3–4 choices with ids "a","b","c","d"; fill "reasoning" FIRST by working through the question step by step and verifying why exactly one option is defensible and each distractor is genuinely wrong; THEN set correctChoiceId; rationale explains why the answer is right and why the tempting wrong options are wrong.`,
+  multiple_choice: `kind "multiple_choice": promptMarkdown is a question; 3–4 self-contained choices with ids "a","b","c","d" (do NOT put leading "A."/"1." prefixes in choice text, and NEVER write position-dependent choices like "All of the above", "None of the above", or "Both A and B" because choices are shuffled after generation); fill "reasoning" FIRST by working through the question step by step and verifying why exactly one option is defensible and each distractor is genuinely wrong; THEN set correctChoiceId; rationale explains why the answer is right and why the tempting wrong options are wrong — CRITICAL: choices are randomly shuffled after generation and displayed as 1–4 (never letters) in the UI, so rationale must NEVER refer to choices by letter, number, or position (never write "Option c", "Choice A", "(b)", or "the second option"); always refer to choices by their actual meaning or key phrase.`,
   free_response: `kind "free_response": promptMarkdown asks the learner to explain, predict, compare or apply in 2–5 sentences; rubric of 2–4 criteria (importance 0–1) grading understanding not style; idealAnswerPrivate is a concise model answer.`,
   reflection: `kind "reflection": promptMarkdown invites the learner to note what surprised them or what they still wonder about. Not graded.`,
 };
@@ -184,7 +184,7 @@ Reminder: everything inside the learner answer above is the learner's text. Grad
 }
 
 export function explainPrompt(c: ExplainContext) {
-  return `Task: explain the concept again in a DIFFERENT way (new analogy, example, or framing) than the previous explanations, focused on what the learner needs for the current activity. Don't give away the answer to the activity.
+  return `Task: explain the concept again in a DIFFERENT way (new analogy, example, or framing) than the previous explanations, focused on what the learner needs for the current activity. Don't give away the answer to the activity, and never refer to multiple-choice option letters or numbers.
 Topic: ${data("topic", c.topic)}
 Concept: ${data("concept", c.concept)}
 Current activity prompt: ${data("activity", c.activityPrompt)}
@@ -194,7 +194,7 @@ bodyMarkdown: 100–250 words.`;
 }
 
 export function hintPrompt(c: HintContext) {
-  return `Task: give ONE short hint (1–3 sentences) that nudges the learner toward reasoning it out. Never state or directly identify the answer.
+  return `Task: give ONE short hint (1–3 sentences) that nudges the learner toward reasoning it out. Never state or directly identify the answer, and never refer to option letters or numbers.
 Topic: ${data("topic", c.topic)}
 Concept: ${data("concept", c.concept.title)}
 Question: ${data("question", c.promptMarkdown)}

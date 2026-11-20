@@ -3,8 +3,8 @@ import { LLMLearningModel, parseJsonObject, type JsonTransport } from "@/lib/ai/
 import { MockLearningModel, subjectOf } from "@/lib/ai/mock-model";
 import { ModelError } from "@/lib/errors";
 import { redact } from "@/lib/log";
-import { shuffleChoices } from "@/lib/services/sessions";
-import { toLearnerActivity } from "@/lib/services/sessions";
+import { remapRationaleLabels, shuffleChoices, toLearnerActivity } from "@/lib/services/sessions";
+import { activityPrompt } from "@/lib/ai/prompts";
 import type { ActivitySpec } from "@/lib/schemas/model";
 
 process.env.ADA_SILENT_LOGS = "true";
@@ -142,6 +142,104 @@ describe("activity DTO and shuffling", () => {
     expect(s.choices.map((c) => c.id)).toEqual(["a", "b", "c"]);
     expect(s.choices.find((c) => c.id === s.correctChoiceId)!.text).toBe("two");
   });
+
+  it("remaps option labels in rationale to match post-shuffle 1-based UI badges", () => {
+    // Reproduces the exact PM chat-assistant bug: [a, b, c, d] rotated left by 1 -> [b, c, d, a]
+    const pmSpec: Extract<ActivitySpec, { kind: "multiple_choice" }> = {
+      version: 1,
+      conceptId: "pm",
+      kind: "multiple_choice",
+      promptMarkdown: "Which of the following best describes what a Product Manager (PM) is primarily responsible for in the development of an AI chat assistant product?",
+      choices: [
+        { id: "a", text: "Designing the user interface and visual style of the chat assistant." },
+        { id: "b", text: "Writing the code that implements the chat assistant’s natural language processing." },
+        { id: "c", text: "Deciding which user problem to solve with the chat assistant and defining success metrics." },
+        { id: "d", text: "Testing the chat assistant and fixing all the bugs found before launch." },
+      ],
+      correctChoiceId: "c",
+      rationale:
+        "Option c is correct because it correctly states the PM's ownership of deciding the user problem and defining success metrics. Options a and b are incorrect because design and engineering tasks are not the primary responsibility of PMs. Option d is incorrect because testing and bug fixing are typically engineering responsibilities, not PM responsibilities.",
+      difficulty: 1,
+    };
+    // rand(() => 0) rotates [a, b, c, d] -> [b, c, d, a] (badges 1=b, 2=c, 3=d, 4=a)
+    const shuffled = shuffleChoices(pmSpec, () => 0);
+    expect(shuffled.choices.map((c) => c.text)).toEqual([
+      "Writing the code that implements the chat assistant’s natural language processing.",
+      "Deciding which user problem to solve with the chat assistant and defining success metrics.",
+      "Testing the chat assistant and fixing all the bugs found before launch.",
+      "Designing the user interface and visual style of the chat assistant.",
+    ]);
+    expect(shuffled.correctChoiceId).toBe("b"); // 2nd item = UI badge 2
+    expect(shuffled.rationale).toBe(
+      "Option 2 is correct because it correctly states the PM's ownership of deciding the user problem and defining success metrics. Options 4 and 1 are incorrect because design and engineering tasks are not the primary responsibility of PMs. Option 3 is incorrect because testing and bug fixing are typically engineering responsibilities, not PM responsibilities.",
+    );
+
+    // Even when shuffle is an identity permutation, letter references become 1-based UI badge numbers (1–4)
+    const unmoved = shuffleChoices(pmSpec, (n) => n - 1);
+    expect(unmoved.correctChoiceId).toBe("c");
+    expect(unmoved.rationale).toContain("Option 3 is correct");
+    expect(unmoved.rationale).toContain("Options 1 and 2 are incorrect");
+    expect(unmoved.rationale).toContain("Option 4 is incorrect");
+  });
+
+  it("handles list/markdown formats and strips accidental choice prefixes without mangling ordinary English prose", () => {
+    const labelMap = new Map([
+      ["a", "4"],
+      ["b", "1"],
+      ["c", "2"],
+      ["d", "3"],
+    ]);
+    expect(remapRationaleLabels("Choice **c** wins; choices (a), 'b', and \"d\" fail.", labelMap)).toBe("Choice **2** wins; choices 4, 1, and 3 fail.");
+    expect(remapRationaleLabels("(c) is correct because it defines metrics; while option a confuses roles, option c's scope fits.", labelMap)).toBe(
+      "(2) is correct because it defines metrics; while option 4 confuses roles, option 2's scope fits.",
+    );
+    // Ordinary English articles, verbs, inline sub-points, function calls, and scenario options must never be rewritten
+    const prose =
+      "A Product Manager owns a chat assistant's direction. This makes the second option a better fit than calling this choice a mistake or giving each answer a bonus. Answer a user's core problem first, and does not answer a vague request, for two reasons: (a) f(a) latency and (b) cost. Choosing Option c and a clear metric works.";
+    expect(remapRationaleLabels(prose, labelMap)).toBe(
+      "A Product Manager owns a chat assistant's direction. This makes the second option a better fit than calling this choice a mistake or giving each answer a bonus. Answer a user's core problem first, and does not answer a vague request, for two reasons: (a) f(a) latency and (b) cost. Choosing Option 2 and a clear metric works.",
+    );
+    expect(
+      remapRationaleLabels("Option A has higher variance than Option B.", labelMap, "A team compares Option A (in-house) and Option B (vendor). Which metric matters?"),
+    ).toBe("Option A has higher variance than Option B.");
+
+    const prefixed: Extract<ActivitySpec, { kind: "multiple_choice" }> = {
+      version: 1,
+      conceptId: "c",
+      kind: "multiple_choice",
+      promptMarkdown: "Pick one",
+      choices: [
+        { id: "a", text: "A. First text" },
+        { id: "b", text: "B. Second text" },
+        { id: "c", text: "C. Third text" },
+      ],
+      correctChoiceId: "b",
+      rationale: "Plain content-based rationale.",
+      difficulty: 1,
+    };
+    const cleaned = shuffleChoices(prefixed, () => 0);
+    expect(cleaned.choices.map((c) => c.text)).toEqual(["Second text", "Third text", "First text"]);
+  });
+
+  it("instructs multiple_choice prompts never to reference option letters or positions", () => {
+    const p = activityPrompt({
+      topic: "PM",
+      intent: "goal",
+      goalText: "Learn PM",
+      baseline: "",
+      timeBudgetMinutesWeekly: null,
+      concept: { slug: "c", title: "C", description: "D", assessmentCriteria: ["A"], prerequisites: [] },
+      kind: "multiple_choice",
+      purpose: "check",
+      difficulty: 1,
+      recentEvidence: [],
+      misconceptions: [],
+      priorPrompts: [],
+      assistanceUsed: 0,
+    });
+    expect(p).toMatch(/NEVER refer to choices by letter, number, or position/);
+  });
+
   it("learner DTO never contains teacher-only fields", () => {
     const dto = toLearnerActivity({ id: "1", purpose: "check", spec_json: spec }, "C");
     expect(JSON.stringify(dto)).not.toMatch(/correctChoiceId|secret rationale|private verification reasoning|reasoning/);
