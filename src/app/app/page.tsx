@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { getPageUser } from "@/lib/auth/server";
-import { listCourses } from "@/lib/services/courses";
-import { GUEST_COURSE_LIMIT, listOpenDrafts } from "@/lib/services/drafts";
+import { getPageUser, getPageWorkspace } from "@/lib/auth/server";
+import { GUEST_COURSE_LIMIT } from "@/lib/services/drafts";
 import { NewCoursePrompt } from "@/components/course/new-course-prompt";
 import { GuestCourseGate } from "@/components/course/guest-course-gate";
 import { AmbientGlyphRow } from "@/components/characters/glyphs";
@@ -11,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const user = await getPageUser();
-  const [courses, drafts] = user ? await Promise.all([listCourses(user.id), listOpenDrafts(user.id)]) : [[], []];
+  const { courses, drafts } = user ? await getPageWorkspace(user.id) : { courses: [], drafts: [] };
   const existingCourse = courses[0] ?? null;
   const existingDraft = drafts[0] ?? null;
   const guestBlocked = !!user?.isGuest && (courses.length >= GUEST_COURSE_LIMIT || existingDraft !== null);

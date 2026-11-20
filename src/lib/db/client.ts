@@ -35,19 +35,34 @@ function getFallback(): Sql {
   return globalForDb.__adaFallbackDb;
 }
 
+function mayFallbackToMemory(databaseUrl: string): boolean {
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") return false;
+  try {
+    const { hostname } = new URL(databaseUrl);
+    return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
 function createResilientClient(url: string): Sql {
+  const allowMemoryFallback = mayFallbackToMemory(url);
   let rawPg: Sql | null = null;
   let useMemory = false;
 
   try {
     rawPg = postgres(url, {
       ...connectionOptions(url),
-      connect_timeout: 3,
+      connect_timeout: 10,
       idle_timeout: 20,
+      max_lifetime: 300,
+      query_timeout: 30,
+      queue_timeout: 15,
       transform: { undefined: null },
     }) as Sql;
     globalForDb.__adaRawPg = rawPg;
-  } catch {
+  } catch (err) {
+    if (!allowMemoryFallback) throw err;
     useMemory = true;
   }
 
@@ -73,7 +88,7 @@ function createResilientClient(url: string): Sql {
     }
     const activePg = rawPg;
     return Promise.resolve(activePg(first as TemplateStringsArray, ...(rest as never[]))).catch((err: unknown) => {
-      if (isConnectionError(err)) {
+      if (allowMemoryFallback && isConnectionError(err)) {
         const mem = switchToMemory();
         return mem(first as TemplateStringsArray, ...(rest as never[]));
       }
@@ -89,7 +104,7 @@ function createResilientClient(url: string): Sql {
       try {
         return (await rawPg.begin(fn)) as T;
       } catch (err) {
-        if (isConnectionError(err)) {
+        if (allowMemoryFallback && isConnectionError(err)) {
           return switchToMemory().begin(fn) as Promise<T>;
         }
         throw err;
