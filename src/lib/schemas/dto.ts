@@ -35,13 +35,23 @@ export type ProposalConceptPreview = {
   isFirst: boolean;
 };
 
+export type DraftSetupStage = "understanding" | "questioning" | "compiling" | "ready" | "converted";
+
+export type DraftInterpretationPreview = {
+  intent: "curiosity" | "goal";
+  goalText: string;
+  assumptions: string[];
+};
+
 export type CourseDraftView = {
   id: string;
   topic: string;
   version: number;
   turns: DraftTurn[];
   state: "collecting" | "ready" | "converted";
+  stage?: DraftSetupStage;
   nextQuestion?: { text: string; options: string[]; field: string; step?: number; maxSteps?: number };
+  interpretation?: DraftInterpretationPreview;
   canGoBack: boolean;
   proposal?: {
     title: string;

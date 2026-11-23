@@ -45,7 +45,9 @@ export function NewCoursePrompt({ needsSession = false }: { needsSession?: boole
     try {
       // First-time visitors start as guests: no sign-up before the first course.
       if (needsSession) await ensureSession();
-      const { draft } = await api<{ draft: CourseDraftView }>("/course-drafts", { body: { topic: t, idempotencyKey: keyRef.current } });
+      const { draft } = await api<{ draft: CourseDraftView }>("/course-drafts", {
+        body: { topic: t, idempotencyKey: keyRef.current, deferAdvance: true },
+      });
       router.push(`/app/new?draft=${draft.id}`);
       // Refresh the persistent shell so the new draft appears in the sidebar immediately.
       router.refresh();
@@ -112,7 +114,7 @@ export function NewCoursePrompt({ needsSession = false }: { needsSession?: boole
       </div>
       <p id="topic-help" className={`mt-2.5 min-h-5 text-center text-xs ${over ? "text-bad" : "text-muted"}`} aria-live="polite">
         {busy
-          ? "Ada is mapping your starting path…"
+          ? "Starting your course setup…"
           : over
             ? `Keep it under ${MAX} characters (${topic.length}).`
             : "Any topic, or paste a link (job post, syllabus, article) — Ada builds an adaptive course around it."}

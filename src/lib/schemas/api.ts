@@ -16,12 +16,14 @@ export const SignInBody = z.object({ email: z.string().trim().max(254), password
 export const CreateDraftBody = z.object({
   topic: z.string().trim().min(1, "Tell Ada what you'd like to learn").max(500, "Keep it under 500 characters"),
   idempotencyKey: idemKey,
+  deferAdvance: z.boolean().optional(),
 });
 
 export const AnswerDraftBody = z
   .object({
     answer: learnerText(1000).optional(),
     startNow: z.boolean().optional(),
+    stepOnly: z.boolean().optional(),
     expectedVersion: z.number().int().positive(),
     idempotencyKey: idemKey,
   })
@@ -29,9 +31,14 @@ export const AnswerDraftBody = z
 
 export const ProposeDraftBody = z.object({
   adjustment: learnerText(500).optional(),
+  stepOnly: z.boolean().optional(),
   expectedVersion: z.number().int().positive(),
 });
-export const BackgroundDraftBody = z.object({ text: z.string().max(8000, "Keep it under 8,000 characters"), expectedVersion: z.number().int().positive() });
+export const BackgroundDraftBody = z.object({
+  text: z.string().max(8000, "Keep it under 8,000 characters"),
+  stepOnly: z.boolean().optional(),
+  expectedVersion: z.number().int().positive(),
+});
 export const BackDraftBody = z.object({ expectedVersion: z.number().int().positive() });
 export const ConvertDraftBody = z.object({
   idempotencyKey: idemKey.optional(),

@@ -755,9 +755,31 @@ function DetourForm({
 }
 
 function ActivitySkeleton({ label }: { label: string }) {
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const subnote =
+    elapsedSec < 4
+      ? null
+      : elapsedSec < 10
+        ? "Tailoring prompt and examples — usually takes a few seconds…"
+        : "Checking question clarity before showing it to you…";
+
   return (
     <div className="space-y-5 rounded-2xl border border-line bg-surface/50 p-5" role="status" aria-live="polite">
-      <Spinner label={label} />
+      <div className="flex items-center justify-between gap-3">
+        <Spinner label={label} />
+        {elapsedSec >= 4 && (
+          <span className="shrink-0 font-mono text-xs text-muted tabular-nums" aria-label={`${elapsedSec} seconds elapsed`}>
+            {elapsedSec}s
+          </span>
+        )}
+      </div>
+      {subnote && <p className="text-xs text-muted">{subnote}</p>}
       <div className="space-y-3 pt-1" aria-hidden="true">
         <div className="h-3 w-28 animate-pulse rounded bg-elevated" />
         <div className="h-5 w-4/5 animate-pulse rounded bg-elevated" />

@@ -4,7 +4,7 @@ import { AppError, conflict, notFound } from "@/lib/errors";
 import { callModel } from "@/lib/ai";
 import { usingMockModel } from "@/lib/env";
 import type { FetchedSource, ModelInfo } from "@/lib/ai/model-adapter";
-import type { CourseDraftView, DraftListItem, DraftTurn, InlineError } from "@/lib/schemas/dto";
+import type { CourseDraftView, DraftListItem, DraftSetupStage, DraftTurn, InlineError } from "@/lib/schemas/dto";
 import type { CurriculumProposal, DraftField, Interpretation } from "@/lib/schemas/model";
 import { validateCurriculum } from "@/lib/learning/curriculum";
 import { track } from "./telemetry";
@@ -73,12 +73,23 @@ export function draftView(row: DraftRow): CourseDraftView {
   const s = row.state_json;
   const p = row.proposal_json;
   const titleBySlug = p ? new Map(p.curriculum.concepts.map((c) => [c.slug, c.title])) : null;
+  const stage: DraftSetupStage =
+    row.status === "converted"
+      ? "converted"
+      : row.status === "ready"
+        ? "ready"
+        : s.pending
+          ? "questioning"
+          : s.interpretation
+            ? "compiling"
+            : "understanding";
   return {
     id: row.id,
     topic: row.topic,
     version: row.version,
     turns: buildTurns(row.topic, s),
     state: row.status,
+    stage,
     nextQuestion: s.pending
       ? {
           text: s.pending.question,
@@ -86,6 +97,13 @@ export function draftView(row: DraftRow): CourseDraftView {
           field: s.pending.field,
           step: Math.min(s.answers.length + 1, MAX_QUESTIONS),
           maxSteps: MAX_QUESTIONS,
+        }
+      : undefined,
+    interpretation: s.interpretation
+      ? {
+          intent: s.interpretation.intent,
+          goalText: s.interpretation.goal_text,
+          assumptions: s.interpretation.assumptions,
         }
       : undefined,
     canGoBack: row.status !== "converted" && (s.answers.length > 0 || s.startNow),
@@ -168,7 +186,7 @@ async function readDraft(ownerId: string, draftId: string): Promise<DraftRow> {
  * is discarded and the step is re-evaluated). A claim on the draft makes a
  * concurrent request wait instead of paying for a duplicate model call.
  */
-async function advanceDraft(ownerId: string, draftId: string): Promise<DraftRow> {
+async function advanceDraft(ownerId: string, draftId: string, opts?: { stopAfterInterpret?: boolean }): Promise<DraftRow> {
   return withClaim(`draft:${draftId}`, async () => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const row = await readDraft(ownerId, draftId);
@@ -204,7 +222,8 @@ async function advanceDraft(ownerId: string, draftId: string): Promise<DraftRow>
             continue;
           }
           state = { ...state, interpretation: value.status === "ready" ? value.interpretation : fallbackInterpretation(row.topic, state.answers) };
-          await apply({ state_json: state, last_error: null });
+          const saved = await apply({ state_json: state, last_error: null });
+          if (saved && opts?.stopAfterInterpret) return saved;
           continue; // next pass compiles the plan from the saved interpretation
         }
         const interp = state.interpretation;
@@ -270,7 +289,12 @@ export async function assertGuestMayCreateCourse(t: Db, ownerId: string, lock = 
   }
 }
 
-export async function createDraft(ownerId: string, topic: string, idempotencyKey: string): Promise<CourseDraftView> {
+export async function createDraft(
+  ownerId: string,
+  topic: string,
+  idempotencyKey: string,
+  opts?: { deferAdvance?: boolean },
+): Promise<CourseDraftView> {
   const clean = topic.replace(/\s+/g, " ").trim();
   const [already] = await db()<{ id: string }[]>`select id from course_drafts where owner_id = ${ownerId} and idempotency_key = ${idempotencyKey}`;
   if (!already) await assertGuestMayCreateCourse(db(), ownerId);
@@ -280,6 +304,7 @@ export async function createDraft(ownerId: string, topic: string, idempotencyKey
     on conflict (owner_id, idempotency_key) do nothing returning id`;
   if (created.length) await track(ownerId, "course_draft_started", {});
   const [existing] = await db()<{ id: string }[]>`select id from course_drafts where owner_id = ${ownerId} and idempotency_key = ${idempotencyKey}`;
+  if (opts?.deferAdvance) return draftView(await readDraft(ownerId, existing.id));
   return draftView(await advanceDraft(ownerId, existing.id));
 }
 
@@ -290,7 +315,7 @@ export async function getDraft(ownerId: string, draftId: string): Promise<Course
 export async function answerDraft(
   ownerId: string,
   draftId: string,
-  input: { answer?: string; startNow?: boolean; expectedVersion: number; idempotencyKey: string },
+  input: { answer?: string; startNow?: boolean; stepOnly?: boolean; expectedVersion: number; idempotencyKey: string },
 ): Promise<CourseDraftView> {
   // Record the answer in a short transaction; the model runs afterwards with no lock held.
   await tx(async (t) => {
@@ -311,7 +336,7 @@ export async function answerDraft(
     }
     await save(t, row, { state_json: state, last_error: null });
   });
-  return draftView(await advanceDraft(ownerId, draftId));
+  return draftView(await advanceDraft(ownerId, draftId, { stopAfterInterpret: input.stepOnly }));
 }
 
 /** "Back": reopen the last answered question and invalidate everything derived from it. */
@@ -345,7 +370,11 @@ export const MAX_BACKGROUND_CHARS = 8000;
  * Saves background the learner pastes (resume, notes) and re-plans with it:
  * the interpretation and any proposal are recomputed; an open question stays open.
  */
-export async function setDraftBackground(ownerId: string, draftId: string, input: { text: string; expectedVersion: number }): Promise<CourseDraftView> {
+export async function setDraftBackground(
+  ownerId: string,
+  draftId: string,
+  input: { text: string; stepOnly?: boolean; expectedVersion: number },
+): Promise<CourseDraftView> {
   await tx(async (t) => {
     const row = await loadForUpdate(t, draftId, ownerId);
     if (row.status === "converted") throw conflict("This course has already been created.");
@@ -353,11 +382,15 @@ export async function setDraftBackground(ownerId: string, draftId: string, input
     const text = input.text.replace(/\u0000/g, "").trim().slice(0, MAX_BACKGROUND_CHARS);
     await save(t, row, { state_json: { ...row.state_json, background: text || null, interpretation: null }, status: "collecting", proposal_json: null, last_error: null });
   });
-  return draftView(await advanceDraft(ownerId, draftId));
+  return draftView(await advanceDraft(ownerId, draftId, { stopAfterInterpret: input.stepOnly }));
 }
 
 /** Generate or retry the proposal (also used for "Adjust" with a free-text adjustment). */
-export async function proposeDraft(ownerId: string, draftId: string, input: { adjustment?: string; expectedVersion: number }): Promise<CourseDraftView> {
+export async function proposeDraft(
+  ownerId: string,
+  draftId: string,
+  input: { adjustment?: string; stepOnly?: boolean; expectedVersion: number },
+): Promise<CourseDraftView> {
   await tx(async (t) => {
     const row = await loadForUpdate(t, draftId, ownerId);
     if (row.status === "converted") return;
@@ -366,7 +399,7 @@ export async function proposeDraft(ownerId: string, draftId: string, input: { ad
       await save(t, row, { state_json: { ...row.state_json, adjustment: input.adjustment.trim().slice(0, 500) }, status: "collecting", proposal_json: null });
     }
   });
-  return draftView(await advanceDraft(ownerId, draftId)); // no-op when already ready or converted
+  return draftView(await advanceDraft(ownerId, draftId, { stopAfterInterpret: input.stepOnly })); // no-op when already ready or converted
 }
 
 /** Transactionally creates the course, goal v1, concept graph and curriculum v1. Exactly once per draft. */

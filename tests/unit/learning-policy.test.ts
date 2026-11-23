@@ -5,7 +5,7 @@ import { estimateReadiness } from "@/lib/learning/readiness";
 import { topoOrder, validateCurriculum, validateExpansion } from "@/lib/learning/curriculum";
 import { chooseNext, type PlannerConcept } from "@/lib/learning/next-action";
 import { CurriculumProposalSchema, MultipleChoiceGenSchema, type CurriculumProposal } from "@/lib/schemas/model";
-import { ConvertDraftBody } from "@/lib/schemas/api";
+import { ConvertDraftBody, CreateDraftBody, ProposeDraftBody } from "@/lib/schemas/api";
 import { describeDueReview } from "@/lib/services/account";
 import { draftView, MAX_QUESTIONS } from "@/lib/services/drafts";
 import { computeTargetSteps } from "@/lib/services/sessions";
@@ -415,6 +415,58 @@ describe("focused outline study & review age formatting", () => {
     expect(future.overdue).toBe(false);
     expect(future.dueLabel).not.toContain("Overdue");
   });
+
+  it("derives progressive setup stages (understanding → questioning → compiling → ready) and exposes interpretation preview", () => {
+    const baseRow = {
+      id: "d-prog",
+      owner_id: "u1",
+      topic: "https://example.com/job-post",
+      status: "collecting" as const,
+      version: 1,
+      converted_course_id: null,
+      last_error: null,
+      proposal_json: null,
+    };
+
+    const fresh = draftView({
+      ...baseRow,
+      state_json: { answers: [], pending: null, startNow: false, interpretation: null, adjustment: null, processedKeys: [] },
+    });
+    expect(fresh.stage).toBe("understanding");
+    expect(fresh.interpretation).toBeUndefined();
+
+    const compiling = draftView({
+      ...baseRow,
+      version: 2,
+      state_json: {
+        answers: [],
+        pending: null,
+        startNow: false,
+        interpretation: {
+          intent: "goal",
+          goal_text: "Prepare for the linked staff backend role",
+          depth: "standard",
+          baseline: "",
+          time_budget_minutes_weekly: 60,
+          success_criteria: [],
+          assumptions: ["Familiar with HTTP APIs", "Distributed systems focus"],
+          link_context: "Backend role requiring consensus & caching",
+        },
+        adjustment: null,
+        processedKeys: [],
+      },
+    });
+    expect(compiling.stage).toBe("compiling");
+    expect(compiling.interpretation).toEqual({
+      intent: "goal",
+      goalText: "Prepare for the linked staff backend role",
+      assumptions: ["Familiar with HTTP APIs", "Distributed systems focus"],
+    });
+
+    expect(CreateDraftBody.parse({ topic: "Rust", idempotencyKey: "12345678", deferAdvance: true })).toMatchObject({ deferAdvance: true });
+    expect(ProposeDraftBody.parse({ expectedVersion: 1, stepOnly: true })).toEqual({ expectedVersion: 1, stepOnly: true });
+  });
 });
+
 
 

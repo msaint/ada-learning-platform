@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowLeft, ArrowUp, Check, Pencil } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, Loader2, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, newKey } from "@/lib/client/api";
-import type { CourseDraftView, DraftTurn } from "@/lib/schemas/dto";
+import type { CourseDraftView, DraftInterpretationPreview, DraftSetupStage, DraftTurn } from "@/lib/schemas/dto";
 import { Button, InlineError, Spinner } from "@/components/ui/primitives";
 
 type Pending = null | "answer" | "back" | "propose" | "convert" | "adjust" | "background";
@@ -35,7 +35,9 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const [draft, setDraft] = useState(initial);
   const [text, setText] = useState("");
   const [pending, setPending] = useState<Pending>(null);
-  const [error, setError] = useState<{ message: string; retry?: () => void } | null>(null);
+  const [error, setError] = useState<{ message: string; retry?: () => void } | null>(
+    initial.error ? { message: initial.error.message } : null,
+  );
   const [adjusting, setAdjusting] = useState(false);
   const [adjustment, setAdjustment] = useState("");
   const [bgOpen, setBgOpen] = useState(false);
@@ -45,10 +47,20 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const [titleInput, setTitleInput] = useState("");
   const answerKey = useRef(newKey());
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const autoAdvancedVersionRef = useRef<number>(-1);
 
   useEffect(() => {
     headingRef.current?.focus();
   }, [draft.nextQuestion?.text, draft.state]);
+
+  function retryCurrentStep(d: CourseDraftView) {
+    const stepOnly = d.stage === "understanding";
+    return run("propose", () =>
+      api<{ draft: CourseDraftView }>(`/course-drafts/${d.id}/propose`, {
+        body: { expectedVersion: d.version, ...(stepOnly ? { stepOnly: true } : {}) },
+      }),
+    );
+  }
 
   function apply(d: CourseDraftView) {
     setDraft(d);
@@ -59,7 +71,7 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
     if (d.error) {
       setError({
         message: d.error.message,
-        retry: d.error.retryable ? () => run("propose", () => api<{ draft: CourseDraftView }>(`/course-drafts/${d.id}/propose`, { body: { expectedVersion: d.version } })) : undefined,
+        retry: d.error.retryable ? () => void retryCurrentStep(d) : undefined,
       });
     } else {
       setError(null);
@@ -87,7 +99,10 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
 
   async function answer(value: string | null) {
     const key = answerKey.current;
-    const body = value === null ? { startNow: true, expectedVersion: draft.version, idempotencyKey: key } : { answer: value, expectedVersion: draft.version, idempotencyKey: key };
+    const body =
+      value === null
+        ? { startNow: true, stepOnly: true, expectedVersion: draft.version, idempotencyKey: key }
+        : { answer: value, stepOnly: true, expectedVersion: draft.version, idempotencyKey: key };
     const d = await run("answer", () => api(`/course-drafts/${draft.id}/answer`, { body }));
     if (d) {
       setText("");
@@ -96,7 +111,36 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   }
 
   const q = draft.nextQuestion;
+  const effectiveStage: DraftSetupStage =
+    draft.stage ??
+    (draft.state === "converted"
+      ? "converted"
+      : draft.state === "ready"
+        ? "ready"
+        : q
+          ? "questioning"
+          : "compiling");
+
   const thinking = pending === "answer" || pending === "propose" || pending === "adjust" || pending === "back" || pending === "background";
+  const isPending = pending !== null;
+  const hasError = Boolean(error || draft.error);
+  const shouldAutoStep = (draft.stage === "understanding" || draft.stage === "compiling") && !hasError && !isPending;
+
+  const autoStepRef = useRef<() => void>(() => {});
+  autoStepRef.current = () => {
+    void retryCurrentStep(draft);
+  };
+
+  // Drive multi-stage setup automatically:
+  // 1) "understanding" runs clarifyCourse (stepOnly: true) -> asks a question OR reveals real interpretation in ~2-3s.
+  // 2) "compiling" runs compileCurriculum -> builds the full concept graph while showing the revealed interpretation.
+  useEffect(() => {
+    if (!shouldAutoStep) return;
+    if (autoAdvancedVersionRef.current === draft.version) return;
+    autoAdvancedVersionRef.current = draft.version;
+    autoStepRef.current();
+  }, [shouldAutoStep, draft.id, draft.version]);
+
   const canQuickPick = draft.state === "collecting" && Boolean(q?.options.length) && !thinking && !pending;
 
   const quickPickRef = useRef<{ options: string[]; answer: (v: string) => void }>({
@@ -144,7 +188,11 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const safeSources = draft.sourcesRead.filter((s) => /^https?:\/\//i.test(s.url));
   const exchanges = groupTurnExchanges(draft.turns.slice(1));
   const displayedTitle = titleOverride ?? draft.proposal?.title ?? "";
-  const compilingPlan = (thinking && pending !== "back") || (draft.state === "collecting" && !q && !error);
+  const hasLink = /https?:\/\//i.test(draft.topic) || safeSources.length > 0;
+  const showProgressCard = (thinking && pending !== "back") || (draft.state === "collecting" && !q && !hasError);
+  const step1Done =
+    pending !== "background" &&
+    (Boolean(draft.interpretation) || effectiveStage === "compiling" || pending === "adjust");
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10 md:py-16">
@@ -181,29 +229,17 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
         </div>
       )}
 
-      {compilingPlan && (
+      {showProgressCard && (
         <div className="mb-6 space-y-4">
-          <Spinner label={q && pending === "answer" ? "Thinking about your answer…" : "Ada is drafting a starting path…"} />
-          <div aria-hidden="true" className="space-y-4 rounded-2xl border border-line bg-surface/60 p-6">
-            <div className="h-3 w-28 animate-pulse rounded bg-elevated" />
-            <div className="h-6 w-3/5 animate-pulse rounded bg-elevated" />
-            <div className="space-y-2 pt-1">
-              <div className="h-3.5 w-full animate-pulse rounded bg-elevated/80" />
-              <div className="h-3.5 w-4/5 animate-pulse rounded bg-elevated/80" />
-            </div>
-            <div className="divide-y divide-line border-t border-line pt-2">
-              <div className="py-3">
-                <div className="h-4 w-2/5 animate-pulse rounded bg-elevated" />
-                <div className="mt-2 h-3 w-3/4 animate-pulse rounded bg-elevated/70" />
-              </div>
-              <div className="py-3">
-                <div className="h-4 w-1/2 animate-pulse rounded bg-elevated" />
-                <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-elevated/70" />
-              </div>
-            </div>
-          </div>
-          {!thinking && draft.state === "collecting" && !q && !error && (
-            <Button size="sm" onClick={() => run("propose", () => api(`/course-drafts/${draft.id}/propose`, { body: { expectedVersion: draft.version } }))}>
+          <SetupProgressCard
+            step1Done={step1Done}
+            answeringQuestion={Boolean(q && pending === "answer")}
+            adjustingPlan={pending === "adjust"}
+            hasLink={hasLink}
+            interpretation={pending === "background" ? undefined : draft.interpretation}
+          />
+          {!thinking && draft.state === "collecting" && !q && !hasError && !draft.stage && (
+            <Button size="sm" onClick={() => void retryCurrentStep(draft)}>
               Continue
             </Button>
           )}
@@ -436,13 +472,13 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
         </section>
       )}
 
-      {draft.state !== "converted" && !thinking && (
+      {draft.state !== "converted" && !thinking && effectiveStage !== "understanding" && effectiveStage !== "compiling" && (
         <section className="mt-8 text-sm" aria-label="Your background">
           {bgOpen ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                run("background", () => api(`/course-drafts/${draft.id}/background`, { body: { text: bgText, expectedVersion: draft.version } })).then((d) => d && setBgOpen(false));
+                run("background", () => api(`/course-drafts/${draft.id}/background`, { body: { text: bgText, stepOnly: true, expectedVersion: draft.version } })).then((d) => d && setBgOpen(false));
               }}
               className="space-y-2"
             >
@@ -488,6 +524,131 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
           <InlineError message={error.message} onRetry={error.retry} retrying={!!pending} />
         </div>
       )}
+    </div>
+  );
+}
+
+function SetupProgressCard({
+  step1Done,
+  answeringQuestion,
+  adjustingPlan,
+  hasLink,
+  interpretation,
+}: {
+  step1Done: boolean;
+  answeringQuestion: boolean;
+  adjustingPlan: boolean;
+  hasLink: boolean;
+  interpretation?: DraftInterpretationPreview;
+}) {
+  const phaseKey = step1Done ? "compile" : "understand";
+  const [elapsedState, setElapsedState] = useState<{ key: string; sec: number }>({ key: phaseKey, sec: 0 });
+  const elapsedSec = elapsedState.key === phaseKey ? elapsedState.sec : 0;
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setElapsedState((prev) => (prev.key === phaseKey ? { key: phaseKey, sec: prev.sec + 1 } : { key: phaseKey, sec: 1 }));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [phaseKey]);
+
+  const statusHeadline = adjustingPlan
+    ? "Updating your starting path…"
+    : step1Done
+      ? "Building your starting path…"
+      : answeringQuestion
+        ? "Thinking about your answer…"
+        : hasLink
+          ? "Reading your link and understanding your goal…"
+          : "Understanding what you want to learn…";
+
+  const step1Detail =
+    elapsedSec < 5
+      ? hasLink
+        ? "Fetching the linked page and checking whether any context is needed…"
+        : "Checking whether Ada needs a quick clarifying question…"
+      : "Summarizing your goal and starting assumptions…";
+
+  const step2Detail =
+    elapsedSec < 5
+      ? "Designing connected concepts tailored to your goal…"
+      : elapsedSec < 12
+        ? "Sequencing prerequisites and success criteria — usually takes 10–15 seconds…"
+        : "Checking the concept graph so nothing depends on an untaught step…";
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-6" role="status" aria-live="polite">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 text-sm font-medium text-ink">
+          <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-accent" />
+          <span>{statusHeadline}</span>
+        </div>
+        {elapsedSec >= 4 && (
+          <span className="shrink-0 font-mono text-xs text-muted tabular-nums" aria-label={`${elapsedSec} seconds elapsed`}>
+            {elapsedSec}s
+          </span>
+        )}
+      </div>
+
+      <ol className="divide-y divide-line border-t border-line text-sm">
+        <li className="py-3.5">
+          <div className="flex items-start gap-3">
+            {step1Done ? (
+              <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-good" />
+            ) : (
+              <span className="mt-0.5 w-4 shrink-0 text-center font-mono text-xs text-accent tabular-nums">01</span>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className={step1Done ? "font-medium text-ink" : "font-medium text-ink"}>
+                <span className="sr-only">{step1Done ? "Completed: " : "In progress: "}</span>
+                {hasLink ? "Read linked source and clarify goal" : "Understand your topic and goal"}
+              </p>
+              {step1Done && interpretation ? (
+                <div className="mt-1.5 space-y-1">
+                  <p className="leading-relaxed text-ink-soft">
+                    <span className="font-medium text-ink">
+                      {interpretation.intent === "goal" ? "Goal: " : "Direction: "}
+                    </span>
+                    {interpretation.goalText}
+                  </p>
+                  {interpretation.assumptions.length > 0 && (
+                    <p className="text-xs text-muted">Assumed: {interpretation.assumptions.join(" · ")}</p>
+                  )}
+                </div>
+              ) : (
+                !step1Done && <p className="mt-1 text-xs text-muted">{step1Detail}</p>
+              )}
+            </div>
+          </div>
+        </li>
+
+        <li className="py-3.5">
+          <div className="flex items-start gap-3">
+            <span className={`mt-0.5 w-4 shrink-0 text-center font-mono text-xs tabular-nums ${step1Done ? "text-accent" : "text-muted"}`}>
+              02
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className={step1Done ? "font-medium text-ink" : "text-muted"}>
+                <span className="sr-only">{step1Done ? "In progress: " : "Upcoming: "}</span>
+                Map concepts and prerequisite order
+              </p>
+              {step1Done && <p className="mt-1 text-xs text-muted">{step2Detail}</p>}
+            </div>
+          </div>
+        </li>
+
+        <li className="py-3.5">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 w-4 shrink-0 text-center font-mono text-xs text-muted tabular-nums">03</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-muted">
+                <span className="sr-only">Upcoming: </span>
+                Validate starting path
+              </p>
+            </div>
+          </div>
+        </li>
+      </ol>
     </div>
   );
 }

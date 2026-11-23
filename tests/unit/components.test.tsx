@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ActivityView } from "@/components/lesson/activity-renderer";
 import { FeedbackPanel } from "@/components/lesson/feedback";
@@ -571,5 +571,179 @@ describe("OutlineList, ReviewQueue & Mid-Lesson Branching", () => {
     expect(screen.getByText(/High-Speed Hunting Sway/)).toBeTruthy();
   });
 });
+
+describe("Fast Multi-Stage Course Creation", () => {
+  it("creates a deferred draft on submit and navigates immediately to /app/new", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ draft: { id: "d-fast" } }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    render(<NewCoursePrompt />);
+    const textarea = screen.getByLabelText("What would you like to learn?");
+    await userEvent.type(textarea, "Distributed caching with Redis");
+    await userEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain("/course-drafts");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      topic: "Distributed caching with Redis",
+      deferAdvance: true,
+    });
+    expect(mockPush).toHaveBeenCalledWith("/app/new?draft=d-fast");
+  });
+
+  it("auto-progresses from understanding to compiling with personalized goal reveal before reaching ready", async () => {
+    let resolveCompile!: (res: Response) => void;
+    const compileGate = new Promise<Response>((resolve) => {
+      resolveCompile = resolve;
+    });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            draft: {
+              id: "d-stage",
+              topic: "Distributed caching with Redis",
+              version: 2,
+              turns: [{ role: "learner", text: "Distributed caching with Redis" }],
+              state: "collecting",
+              stage: "compiling",
+              interpretation: {
+                intent: "goal",
+                goalText: "Design cache invalidation and stampede protection in production",
+                assumptions: ["Comfortable with HTTP services", "Knows basic key-value lookups"],
+              },
+              canGoBack: false,
+              sourcesRead: [],
+              background: null,
+              devModel: true,
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockImplementationOnce(() => compileGate);
+
+    render(
+      <CourseSetup
+        initial={{
+          id: "d-stage",
+          topic: "Distributed caching with Redis",
+          version: 1,
+          turns: [{ role: "learner", text: "Distributed caching with Redis" }],
+          state: "collecting",
+          stage: "understanding",
+          canGoBack: false,
+          sourcesRead: [],
+          background: null,
+          devModel: true,
+        }}
+      />,
+    );
+
+    // Stage 1 fires automatically with stepOnly: true, then Stage 2 begins while revealing the personalized interpretation
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+      expectedVersion: 1,
+      stepOnly: true,
+    });
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toEqual({
+      expectedVersion: 2,
+    });
+
+    expect(screen.getByText("Building your starting path…")).toBeTruthy();
+    expect(screen.getByText(/Design cache invalidation and stampede protection in production/)).toBeTruthy();
+    expect(screen.getByText(/Comfortable with HTTP services · Knows basic key-value lookups/)).toBeTruthy();
+    expect(screen.getByText("Map concepts and prerequisite order")).toBeTruthy();
+
+    resolveCompile(
+      new Response(
+        JSON.stringify({
+          draft: {
+            id: "d-stage",
+            topic: "Distributed caching with Redis",
+            version: 3,
+            turns: [{ role: "learner", text: "Distributed caching with Redis" }],
+            state: "ready",
+            stage: "ready",
+            canGoBack: false,
+            sourcesRead: [],
+            background: null,
+            devModel: true,
+            proposal: {
+              title: "Production Redis Caching",
+              direction: "Move from TTL fundamentals to stampede-safe read-through patterns.",
+              intent: "goal",
+              goalText: "Design cache invalidation and stampede protection in production",
+              initialConceptTitles: ["Cache-Aside & TTLs", "Stampede Locking"],
+              initialConcepts: [
+                {
+                  slug: "cache-aside",
+                  title: "Cache-Aside & TTLs",
+                  description: "Coordinate application reads and explicit invalidations.",
+                  prerequisiteTitles: [],
+                  isFirst: true,
+                },
+              ],
+              suggestedMinutesWeekly: 45,
+              cadenceNote: "Two focused sessions a week.",
+              assumptions: ["Comfortable with HTTP services"],
+              successCriteria: ["Prevent thundering herds under cold-cache load"],
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Production Redis Caching" })).toBeTruthy();
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("halts automatic setup progression on a retryable failure instead of looping", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: { code: "ai_unavailable", message: "Model timed out", retryable: true },
+        }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    render(
+      <CourseSetup
+        initial={{
+          id: "d-err",
+          topic: "Compiler design",
+          version: 1,
+          turns: [{ role: "learner", text: "Compiler design" }],
+          state: "collecting",
+          stage: "understanding",
+          canGoBack: false,
+          sourcesRead: [],
+          background: null,
+          devModel: false,
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("Model timed out");
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 
 
