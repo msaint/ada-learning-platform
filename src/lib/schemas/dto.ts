@@ -27,13 +27,21 @@ export type DraftListItem = {
 
 export type DraftTurn = { role: "ada" | "learner"; text: string };
 
+export type ProposalConceptPreview = {
+  slug: string;
+  title: string;
+  description: string;
+  prerequisiteTitles: string[];
+  isFirst: boolean;
+};
+
 export type CourseDraftView = {
   id: string;
   topic: string;
   version: number;
   turns: DraftTurn[];
   state: "collecting" | "ready" | "converted";
-  nextQuestion?: { text: string; options: string[]; field: string };
+  nextQuestion?: { text: string; options: string[]; field: string; step?: number; maxSteps?: number };
   canGoBack: boolean;
   proposal?: {
     title: string;
@@ -41,6 +49,7 @@ export type CourseDraftView = {
     intent: "curiosity" | "goal";
     goalText: string;
     initialConceptTitles: string[];
+    initialConcepts?: ProposalConceptPreview[];
     suggestedMinutesWeekly: number | null;
     cadenceNote: string;
     assumptions: string[];
@@ -69,6 +78,7 @@ export type CourseHeader = {
   nextAction: NextAction;
   openSession: { id: string; kind: "lesson" | "review" | "placement" | "assessment"; status: "active" | "paused" } | null;
   reviewDueCount: number;
+  conceptSummary?: { total: number; demonstrated: number; developing: number };
 };
 
 export type LearnerActivity =
@@ -134,6 +144,8 @@ export type SessionView = {
   difficultyOffset: number;
   phase: SessionPhase;
   position: number;
+  /** Expected or maximum step count for this session, used for honest pacing. */
+  targetSteps?: number;
   activity: LearnerActivity | null;
   draft: { value: { choiceId?: string; text?: string }; version: number } | null;
   hints: string[];
@@ -170,6 +182,7 @@ export type OutlineView = {
     status: DisplayStatusDTO;
     depth: number;
     prerequisiteTitles: string[];
+    unmetPrerequisiteTitles?: string[];
     unlocksTitles: string[];
     relatedTitles: string[];
     struggling: boolean;
@@ -186,9 +199,9 @@ export type CourseProgress = {
   goalText?: string;
   readiness?: { band: "unknown" | "early" | "developing" | "approaching" | "demonstrated"; basis: string; evidenceCount: number };
   concepts: { id: string; title: string; status: DisplayStatusDTO; evidenceCount: number; reason: string }[];
-  canDo: { title: string; criteria: string[] }[];
-  needsPractice: { title: string; reason: string }[];
-  dueToRevisit: { conceptTitle: string; dueAt: string; dueLabel: string }[];
+  canDo: { id: string; title: string; criteria: string[] }[];
+  needsPractice: { id: string; title: string; reason: string }[];
+  dueToRevisit: { conceptId: string; conceptTitle: string; dueAt: string; dueLabel: string; dueNow: boolean }[];
   curiosity?: { exploredCount: number; branchCount: number; recentExplanations: { conceptTitle: string; at: string }[]; openQuestions: string[]; suggestedBranches: string[] };
   activity: { sessions: number; activities: number };
   nextAction: NextAction;

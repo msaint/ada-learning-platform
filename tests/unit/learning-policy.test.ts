@@ -5,6 +5,10 @@ import { estimateReadiness } from "@/lib/learning/readiness";
 import { topoOrder, validateCurriculum, validateExpansion } from "@/lib/learning/curriculum";
 import { chooseNext, type PlannerConcept } from "@/lib/learning/next-action";
 import { CurriculumProposalSchema, MultipleChoiceGenSchema, type CurriculumProposal } from "@/lib/schemas/model";
+import { ConvertDraftBody } from "@/lib/schemas/api";
+import { describeDueReview } from "@/lib/services/account";
+import { draftView, MAX_QUESTIONS } from "@/lib/services/drafts";
+import { computeTargetSteps } from "@/lib/services/sessions";
 
 const t0 = new Date("2026-01-01T12:00:00Z");
 const ev = (o: Partial<EvidenceRecord> & { activityId: string }, minutes = 0): EvidenceRecord => ({
@@ -228,4 +232,189 @@ describe("next-action planner", () => {
   it("uses learner-selected focus", () => {
     expect(chooseNext({ ...base, concepts: [pc("c1"), pc("c9")], focusConceptId: "c9" })).toMatchObject({ conceptId: "c9" });
   });
+
+  it("computes honest session target steps across lesson, review, placement, and assessment", () => {
+    // Quick lesson caps at 5 steps
+    expect(computeTargetSteps({ kind: "lesson", position: 2, currentUnanswered: true, stepCount: 2, planCount: 6, dueCount: 0, timeBudgetMinutesWeekly: 20, depth: "quick" })).toBe(5);
+    // Review session keeps total invariant before and after answering step 1 of 2
+    expect(computeTargetSteps({ kind: "review", position: 1, currentUnanswered: true, stepCount: 1, planCount: 6, dueCount: 2, timeBudgetMinutesWeekly: null, depth: "standard" })).toBe(2);
+    expect(computeTargetSteps({ kind: "review", position: 1, currentUnanswered: false, stepCount: 1, planCount: 6, dueCount: 1, timeBudgetMinutesWeekly: null, depth: "standard" })).toBe(2);
+    // Placement caps at PLACEMENT_MAX (5), assessment is planCount + 1 integrative
+    expect(computeTargetSteps({ kind: "placement", position: 1, currentUnanswered: true, stepCount: 1, planCount: 4, dueCount: 0, timeBudgetMinutesWeekly: null, depth: "standard" })).toBe(4);
+    expect(computeTargetSteps({ kind: "assessment", position: 1, currentUnanswered: true, stepCount: 1, planCount: 4, dueCount: 0, timeBudgetMinutesWeekly: null, depth: "standard" })).toBe(5);
+  });
 });
+
+describe("course draft view & conversion schema", () => {
+  it("populates clarifying question step counts and rich concept previews from proposal_json", () => {
+    const collecting = draftView({
+      id: "d1",
+      owner_id: "u1",
+      topic: "SQL window functions",
+      status: "collecting",
+      version: 2,
+      converted_course_id: null,
+      last_error: null,
+      proposal_json: null,
+      state_json: {
+        answers: [{ field: "desired_outcome", question: "What for?", options: ["Interviews"], answer: "Interviews", reasonCode: "goal" }],
+        pending: { question: "Current SQL comfort?", options: ["Basic joins", "Subqueries"], field: "baseline", reasonCode: "level" },
+        startNow: false,
+        interpretation: null,
+        adjustment: null,
+        processedKeys: [],
+      },
+    });
+    expect(collecting.nextQuestion).toMatchObject({
+      text: "Current SQL comfort?",
+      step: 2,
+      maxSteps: MAX_QUESTIONS,
+    });
+
+    const ready = draftView({
+      id: "d1",
+      owner_id: "u1",
+      topic: "SQL window functions",
+      status: "ready",
+      version: 4,
+      converted_course_id: null,
+      last_error: null,
+      state_json: {
+        answers: [],
+        pending: null,
+        startNow: true,
+        interpretation: null,
+        adjustment: null,
+        processedKeys: [],
+      },
+      proposal_json: {
+        curriculum: {
+          title: "Practical Window Functions",
+          direction: "Move from partitions to frames.",
+          first_concept_slug: "partitions",
+          suggested_minutes_weekly: 45,
+          cadence_note: "Two short sessions a week.",
+          success_criteria: ["Write ranking and rolling-sum queries"],
+          concepts: [
+            {
+              slug: "partitions",
+              title: "OVER and PARTITION BY",
+              description: "Compute aggregates per group without collapsing rows.",
+              assessment_criteria: ["Explain difference from GROUP BY"],
+              importance: 3,
+              prerequisites: [],
+              needs_fact_check: false,
+            },
+            {
+              slug: "frames",
+              title: "Sliding Window Frames",
+              description: "Control ROWS vs RANGE bounds for moving averages.",
+              assessment_criteria: ["Write a 7-day rolling sum"],
+              importance: 2,
+              prerequisites: ["partitions"],
+              needs_fact_check: false,
+            },
+          ],
+        },
+        interpretation: {
+          intent: "goal",
+          goal_text: "Pass SQL analytics interviews",
+          depth: "standard",
+          baseline: "Comfortable with GROUP BY",
+          time_budget_minutes_weekly: 45,
+          success_criteria: [],
+          assumptions: ["PostgreSQL syntax"],
+          link_context: null,
+        },
+        modelInfo: { provider: "mock", model: "mock", operation: "compile", latencyMs: 10 },
+      },
+    });
+
+    expect(ready.proposal?.initialConceptTitles).toEqual(["OVER and PARTITION BY", "Sliding Window Frames"]);
+    expect(ready.proposal?.initialConcepts).toEqual([
+      {
+        slug: "partitions",
+        title: "OVER and PARTITION BY",
+        description: "Compute aggregates per group without collapsing rows.",
+        prerequisiteTitles: [],
+        isFirst: true,
+      },
+      {
+        slug: "frames",
+        title: "Sliding Window Frames",
+        description: "Control ROWS vs RANGE bounds for moving averages.",
+        prerequisiteTitles: ["OVER and PARTITION BY"],
+        isFirst: false,
+      },
+    ]);
+  });
+
+  it("validates optional trimmed custom title in ConvertDraftBody", () => {
+    expect(ConvertDraftBody.parse({})).toEqual({});
+    expect(ConvertDraftBody.parse({ title: "  My Custom SQL Course  " })).toEqual({ title: "My Custom SQL Course" });
+    expect(ConvertDraftBody.safeParse({ title: "   " }).success).toBe(false);
+    expect(ConvertDraftBody.safeParse({ title: "x".repeat(121) }).success).toBe(false);
+  });
+});
+
+describe("focused outline study & review age formatting", () => {
+  it("prioritizes focusConceptId in review sessions, step 1 of focused lessons, and demonstrated concept revisits", () => {
+    const mk = (id: string, status: PlannerConcept["status"] = "not_assessed", needsRecall = false): PlannerConcept => ({
+      id,
+      title: id,
+      position: Number(id.replace(/\D/g, "")) || 0,
+      prerequisiteIds: [],
+      status,
+      inPlan: true,
+      needsRecall,
+      history: { explained: false, predicted: false, assessments: 0, lastAssessKind: null, reviewActivities: 0 },
+    });
+
+    // Review session prioritizes the focused due concept first
+    const reviewPick = chooseNext({
+      sessionKind: "review",
+      intent: "goal",
+      concepts: [mk("c1", "review_due"), mk("c2", "review_due")],
+      sessionSteps: [],
+      dueReviews: [
+        { reviewItemId: "r1", conceptId: "c1" },
+        { reviewItemId: "r2", conceptId: "c2" },
+      ],
+      focusConceptId: "c2",
+    });
+    expect(reviewPick).toMatchObject({ action: "activity", conceptId: "c2", purpose: "review", reviewItemId: "r2" });
+
+    // Focused lesson step 1 is not hijacked by another concept's pending recall
+    const focusedStep1 = chooseNext({
+      sessionKind: "lesson",
+      intent: "goal",
+      concepts: [mk("c1", "developing", true), mk("c2", "not_assessed", false)],
+      sessionSteps: [],
+      dueReviews: [],
+      focusConceptId: "c2",
+    });
+    expect(focusedStep1).toMatchObject({ action: "activity", conceptId: "c2" });
+
+    // Explicitly focusing an already-demonstrated concept gives a transfer challenge on that concept
+    const demonstratedRevisit = chooseNext({
+      sessionKind: "lesson",
+      intent: "goal",
+      concepts: [mk("c1", "demonstrated"), mk("c2", "not_assessed")],
+      sessionSteps: [],
+      dueReviews: [],
+      focusConceptId: "c1",
+    });
+    expect(demonstratedRevisit).toMatchObject({ action: "activity", conceptId: "c1", purpose: "transfer", difficulty: 3 });
+  });
+
+  it("distinguishes reviews due today from multi-day overdue items", () => {
+    const now = new Date("2026-03-10T18:00:00Z");
+    expect(describeDueReview(new Date("2026-03-10T10:00:00Z"), now, "UTC")).toEqual({ dueLabel: "Due today", overdue: false });
+    expect(describeDueReview(new Date("2026-03-07T12:00:00Z"), now, "UTC")).toEqual({ dueLabel: "Overdue · 3d", overdue: true });
+    const future = describeDueReview(new Date("2026-03-12T15:00:00Z"), now, "UTC");
+    expect(future.overdue).toBe(false);
+    expect(future.dueLabel).not.toContain("Overdue");
+  });
+});
+
+

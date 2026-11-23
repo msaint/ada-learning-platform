@@ -1,13 +1,34 @@
 "use client";
 
-import { ArrowLeft, ArrowUp } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, newKey } from "@/lib/client/api";
-import type { CourseDraftView } from "@/lib/schemas/dto";
+import type { CourseDraftView, DraftTurn } from "@/lib/schemas/dto";
 import { Button, InlineError, Spinner } from "@/components/ui/primitives";
 
 type Pending = null | "answer" | "back" | "propose" | "convert" | "adjust" | "background";
+
+type TurnExchange = { question?: string; answer: string };
+
+function groupTurnExchanges(turns: DraftTurn[]): TurnExchange[] {
+  const out: TurnExchange[] = [];
+  for (let i = 0; i < turns.length; i++) {
+    const t = turns[i];
+    if (t.role === "ada") {
+      const next = turns[i + 1];
+      if (next && next.role === "learner") {
+        out.push({ question: t.text, answer: next.text });
+        i++;
+      } else {
+        out.push({ question: t.text, answer: "" });
+      }
+    } else {
+      out.push({ answer: t.text });
+    }
+  }
+  return out;
+}
 
 export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const router = useRouter();
@@ -19,6 +40,9 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
   const [adjustment, setAdjustment] = useState("");
   const [bgOpen, setBgOpen] = useState(false);
   const [bgText, setBgText] = useState(initial.background ?? "");
+  const [titleOverride, setTitleOverride] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
   const answerKey = useRef(newKey());
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -28,8 +52,18 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
 
   function apply(d: CourseDraftView) {
     setDraft(d);
-    if (d.error) setError({ message: d.error.message, retry: d.error.retryable ? () => run("propose", () => api<{ draft: CourseDraftView }>(`/course-drafts/${d.id}/propose`, { body: { expectedVersion: d.version } })) : undefined });
-    else setError(null);
+    if (d.proposal?.title !== draft.proposal?.title) {
+      setTitleOverride(null);
+      setEditingTitle(false);
+    }
+    if (d.error) {
+      setError({
+        message: d.error.message,
+        retry: d.error.retryable ? () => run("propose", () => api<{ draft: CourseDraftView }>(`/course-drafts/${d.id}/propose`, { body: { expectedVersion: d.version } })) : undefined,
+      });
+    } else {
+      setError(null);
+    }
   }
 
   async function run(kind: Pending, fn: () => Promise<{ draft: CourseDraftView }>) {
@@ -61,11 +95,43 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
     }
   }
 
+  const q = draft.nextQuestion;
+  const thinking = pending === "answer" || pending === "propose" || pending === "adjust" || pending === "back" || pending === "background";
+  const canQuickPick = draft.state === "collecting" && Boolean(q?.options.length) && !thinking && !pending;
+
+  const quickPickRef = useRef<{ options: string[]; answer: (v: string) => void }>({
+    options: [],
+    answer: () => {},
+  });
+  quickPickRef.current = { options: q?.options ?? [], answer: (v: string) => void answer(v) };
+
+  useEffect(() => {
+    if (!canQuickPick) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      const n = Number.parseInt(e.key, 10);
+      if (!Number.isInteger(n) || n < 1) return;
+      const opt = quickPickRef.current.options[n - 1];
+      if (opt) {
+        e.preventDefault();
+        quickPickRef.current.answer(opt);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canQuickPick, draft.version]);
+
   async function startCourse() {
     setPending("convert");
     setError(null);
+    const candidate = (editingTitle ? titleInput : titleOverride ?? "").trim();
+    const customTitle = candidate && candidate !== draft.proposal?.title ? candidate.slice(0, 120) : undefined;
     try {
-      const r = await api<{ courseId: string }>(`/course-drafts/${draft.id}/convert`, { body: {} });
+      const r = await api<{ courseId: string }>(`/course-drafts/${draft.id}/convert`, {
+        body: customTitle ? { title: customTitle } : {},
+      });
       // Starting a course is a clear signal: open straight into its first step.
       router.push(`/app/courses/${r.courseId}?start=1`);
       router.refresh();
@@ -75,18 +141,19 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
     }
   }
 
-  const q = draft.nextQuestion;
-  const learnerTurns = draft.turns.slice(1);
-  const thinking = pending === "answer" || pending === "propose" || pending === "adjust" || pending === "back" || pending === "background";
+  const safeSources = draft.sourcesRead.filter((s) => /^https?:\/\//i.test(s.url));
+  const exchanges = groupTurnExchanges(draft.turns.slice(1));
+  const displayedTitle = titleOverride ?? draft.proposal?.title ?? "";
+  const compilingPlan = (thinking && pending !== "back") || (draft.state === "collecting" && !q && !error);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10 md:py-16">
       <p className="mb-1 text-sm text-muted">New course</p>
-      <p className={`${draft.sourcesRead.length ? "mb-3" : "mb-8"} text-xl font-semibold break-words text-ink`}>{draft.topic}</p>
-      {draft.sourcesRead.length > 0 && (
+      <p className={`${safeSources.length ? "mb-3" : "mb-8"} text-xl font-semibold break-words text-ink`}>{draft.topic}</p>
+      {safeSources.length > 0 && (
         <p className="mb-8 text-sm text-muted">
           Ada read:{" "}
-          {draft.sourcesRead.map((s, i) => (
+          {safeSources.map((s, i) => (
             <span key={s.url}>
               {i > 0 && " · "}
               <a href={s.url} target="_blank" rel="noopener noreferrer nofollow" className="text-ink-soft underline underline-offset-2 hover:text-ink">
@@ -97,32 +164,70 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
         </p>
       )}
 
-      {learnerTurns.length > 0 && (
-        <ol aria-label="Your answers so far" className="mb-8 space-y-2 rounded-xl border border-line bg-surface/60 px-4 py-3 text-sm break-words">
-          {learnerTurns.map((t, i) => (
-            <li key={i} className={t.role === "ada" ? "text-muted" : "text-ink-soft"}>
-              {t.role === "ada" ? t.text : <span className="font-medium text-ink">{t.text}</span>}
+      {exchanges.length > 0 && (
+        <ol aria-label="Your answers so far" className="mb-8 divide-y divide-line rounded-xl border border-line bg-surface/60 px-4 py-1 text-sm break-words">
+          {exchanges.map((ex, i) => (
+            <li key={i} className="py-2.5">
+              {ex.question && <p className="text-xs text-muted">{ex.question}</p>}
+              {ex.answer && <p className={`${ex.question ? "mt-0.5" : ""} font-medium text-ink`}>{ex.answer}</p>}
             </li>
           ))}
         </ol>
       )}
 
-      {thinking && (
+      {thinking && pending === "back" && (
         <div className="mb-6">
-          <Spinner label={pending === "back" ? "Going back…" : q ? "Thinking about your answer…" : "Ada is drafting a starting path…"} />
+          <Spinner label="Going back…" />
+        </div>
+      )}
+
+      {compilingPlan && (
+        <div className="mb-6 space-y-4">
+          <Spinner label={q && pending === "answer" ? "Thinking about your answer…" : "Ada is drafting a starting path…"} />
+          <div aria-hidden="true" className="space-y-4 rounded-2xl border border-line bg-surface/60 p-6">
+            <div className="h-3 w-28 animate-pulse rounded bg-elevated" />
+            <div className="h-6 w-3/5 animate-pulse rounded bg-elevated" />
+            <div className="space-y-2 pt-1">
+              <div className="h-3.5 w-full animate-pulse rounded bg-elevated/80" />
+              <div className="h-3.5 w-4/5 animate-pulse rounded bg-elevated/80" />
+            </div>
+            <div className="divide-y divide-line border-t border-line pt-2">
+              <div className="py-3">
+                <div className="h-4 w-2/5 animate-pulse rounded bg-elevated" />
+                <div className="mt-2 h-3 w-3/4 animate-pulse rounded bg-elevated/70" />
+              </div>
+              <div className="py-3">
+                <div className="h-4 w-1/2 animate-pulse rounded bg-elevated" />
+                <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-elevated/70" />
+              </div>
+            </div>
+          </div>
+          {!thinking && draft.state === "collecting" && !q && !error && (
+            <Button size="sm" onClick={() => run("propose", () => api(`/course-drafts/${draft.id}/propose`, { body: { expectedVersion: draft.version } }))}>
+              Continue
+            </Button>
+          )}
         </div>
       )}
 
       {draft.state === "collecting" && q && !thinking && (
         <section aria-labelledby="ada-question">
+          {q.step && q.maxSteps && (
+            <p className="mb-2 text-xs text-muted tabular-nums">
+              Question {q.step} of up to {q.maxSteps}
+            </p>
+          )}
           <h1 id="ada-question" ref={headingRef} tabIndex={-1} className="mb-5 text-2xl leading-snug font-semibold tracking-tight text-ink focus:outline-none">
             {q.text}
           </h1>
           {q.options.length > 0 && (
             <div className="mb-4 flex flex-wrap gap-2.5" role="group" aria-label="Quick answers">
-              {q.options.map((o) => (
+              {q.options.map((o, idx) => (
                 <Button key={o} onClick={() => answer(o)} disabled={!!pending}>
-                  {o}
+                  <span aria-hidden="true" className="font-mono text-xs text-muted tabular-nums">
+                    {idx + 1}
+                  </span>
+                  <span>{o}</span>
                 </Button>
               ))}
             </div>
@@ -167,19 +272,67 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
         </section>
       )}
 
-      {draft.state === "collecting" && !q && !thinking && !error && (
-        <div className="space-y-3">
-          <Spinner label="Ada is drafting a starting path…" />
-          <Button size="sm" onClick={() => run("propose", () => api(`/course-drafts/${draft.id}/propose`, { body: { expectedVersion: draft.version } }))}>Continue</Button>
-        </div>
-      )}
-
       {draft.state === "ready" && draft.proposal && !thinking && (
         <section aria-labelledby="proposal-title" className="rounded-2xl border border-line-strong bg-surface p-6">
-          <p className="mb-1 text-xs font-medium text-prism">{draft.proposal.intent === "goal" ? "Goal course" : "Curiosity course"}</p>
-          <h1 id="proposal-title" ref={headingRef} tabIndex={-1} className="mb-2 text-2xl font-semibold tracking-tight text-ink focus:outline-none">
-            {draft.proposal.title}
-          </h1>
+          <p className="mb-1.5 text-xs font-medium text-prism tabular-nums">
+            {draft.proposal.intent === "goal" ? "Goal course" : "Curiosity course"}
+            {draft.proposal.suggestedMinutesWeekly ? ` · About ${draft.proposal.suggestedMinutesWeekly} min/week` : ""}
+          </p>
+
+          {editingTitle ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cleaned = titleInput.trim();
+                if (cleaned) setTitleOverride(cleaned.slice(0, 120));
+                setEditingTitle(false);
+              }}
+              className="mb-3 flex flex-wrap items-center gap-2"
+            >
+              <label htmlFor="proposal-title-input" className="sr-only">
+                Course title
+              </label>
+              <input
+                id="proposal-title-input"
+                autoFocus
+                value={titleInput}
+                maxLength={120}
+                onChange={(e) => setTitleInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditingTitle(false);
+                  }
+                }}
+                className="min-h-11 flex-1 rounded-xl border border-line-strong bg-paper px-3.5 text-lg font-semibold text-ink focus:border-accent/70 focus:outline-none"
+              />
+              <Button type="submit" size="sm" variant="secondary" disabled={!titleInput.trim()}>
+                <Check className="size-4" aria-hidden /> Done
+              </Button>
+              <Button type="button" size="sm" variant="quiet" onClick={() => setEditingTitle(false)}>
+                Cancel
+              </Button>
+            </form>
+          ) : (
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <h1 id="proposal-title" ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-tight text-ink focus:outline-none">
+                {displayedTitle}
+              </h1>
+              <button
+                type="button"
+                aria-label="Edit course title"
+                onClick={() => {
+                  setTitleInput(displayedTitle);
+                  setEditingTitle(true);
+                }}
+                className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium whitespace-nowrap text-muted transition-colors hover:bg-elevated hover:text-ink"
+              >
+                <Pencil className="size-3.5" aria-hidden />
+                <span>Rename</span>
+              </button>
+            </div>
+          )}
+
           <p className="mb-5 leading-relaxed text-ink-soft">{draft.proposal.direction}</p>
           {draft.proposal.successCriteria.length > 0 && (
             <p className="mb-5 text-sm text-ink-soft">
@@ -187,14 +340,45 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
               {draft.proposal.successCriteria.join("; ")}
             </p>
           )}
-          <h2 className="mb-2 text-sm font-medium text-ink">Your starting path</h2>
-          <ol className="mb-5 list-decimal space-y-1.5 pl-5 text-ink-soft">
-            {draft.proposal.initialConceptTitles.map((t) => (
-              <li key={t}>{t}</li>
-            ))}
-          </ol>
+
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-ink">Your starting path</h2>
+            <span className="text-xs text-muted tabular-nums">
+              {(draft.proposal.initialConcepts?.length ?? draft.proposal.initialConceptTitles.length)} concepts
+            </span>
+          </div>
+
+          {draft.proposal.initialConcepts && draft.proposal.initialConcepts.length > 0 ? (
+            <ol className="mb-5 divide-y divide-line border-y border-line">
+              {draft.proposal.initialConcepts.map((c, idx) => (
+                <li key={c.slug} className="py-3">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="w-5 shrink-0 font-mono text-xs text-muted tabular-nums">
+                      {String(idx + 1).padStart(2, "0")}
+                    </span>
+                    <span className="font-medium text-ink">{c.title}</span>
+                    {c.isFirst && (
+                      <span className="text-xs text-accent">
+                        <span aria-hidden="true">· </span>Starts here
+                      </span>
+                    )}
+                  </div>
+                  {c.description && <p className="mt-1 pl-7 text-sm leading-relaxed text-ink-soft">{c.description}</p>}
+                  {c.prerequisiteTitles.length > 0 && (
+                    <p className="mt-1 pl-7 text-xs text-muted">Builds on {c.prerequisiteTitles.join(", ")}</p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <ol className="mb-5 list-decimal space-y-1.5 pl-5 text-ink-soft">
+              {draft.proposal.initialConceptTitles.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ol>
+          )}
+
           <p className="mb-1 text-sm text-muted">
-            {draft.proposal.suggestedMinutesWeekly ? `Suggested: about ${draft.proposal.suggestedMinutesWeekly} minutes a week. ` : ""}
             {draft.proposal.cadenceNote} The path adapts as you learn.
           </p>
           {draft.proposal.assumptions.length > 0 && <p className="mb-5 text-sm text-muted">Assumed: {draft.proposal.assumptions.join(" · ")}</p>}
@@ -216,10 +400,22 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
               <label htmlFor="adjust" className="text-sm font-medium text-ink">
                 What should change?
               </label>
-              <input id="adjust" autoFocus value={adjustment} maxLength={500} onChange={(e) => setAdjustment(e.target.value)} placeholder="e.g. more about the history, skip the basics" className="min-h-11 w-full rounded-xl border border-line-strong bg-paper px-3.5 text-ink placeholder:text-muted/75 focus:border-accent/70 focus:outline-none" />
+              <input
+                id="adjust"
+                autoFocus
+                value={adjustment}
+                maxLength={500}
+                onChange={(e) => setAdjustment(e.target.value)}
+                placeholder="e.g. more about the history, skip the basics"
+                className="min-h-11 w-full rounded-xl border border-line-strong bg-paper px-3.5 text-ink placeholder:text-muted/75 focus:border-accent/70 focus:outline-none"
+              />
               <div className="flex gap-2">
-                <Button type="submit" variant="primary" disabled={!adjustment.trim()}>Update plan</Button>
-                <Button type="button" variant="quiet" onClick={() => setAdjusting(false)}>Cancel</Button>
+                <Button type="submit" variant="primary" disabled={!adjustment.trim()}>
+                  Update plan
+                </Button>
+                <Button type="button" variant="quiet" onClick={() => setAdjusting(false)}>
+                  Cancel
+                </Button>
               </div>
             </form>
           ) : (
@@ -266,7 +462,15 @@ export function CourseSetup({ initial }: { initial: CourseDraftView }) {
                 <Button type="submit" size="sm" variant="primary" disabled={bgText.trim() === (draft.background ?? "")}>
                   {draft.background ? "Update background" : "Use this background"}
                 </Button>
-                <Button type="button" size="sm" variant="quiet" onClick={() => { setBgOpen(false); setBgText(draft.background ?? ""); }}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="quiet"
+                  onClick={() => {
+                    setBgOpen(false);
+                    setBgText(draft.background ?? "");
+                  }}
+                >
                   Cancel
                 </Button>
               </div>

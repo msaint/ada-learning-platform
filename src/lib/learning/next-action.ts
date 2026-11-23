@@ -137,7 +137,8 @@ function planReview(input: PlannerInput): PlannerDecision {
   const limits = input.limits ?? DEFAULT_LIMITS;
   const byId = new Map(input.concepts.map((c) => [c.id, c]));
   const reviewed = new Set(input.sessionSteps.map((s) => s.conceptId));
-  const next = input.dueReviews.find((r) => !reviewed.has(r.conceptId) && byId.has(r.conceptId));
+  const eligible = input.dueReviews.filter((r) => !reviewed.has(r.conceptId) && byId.has(r.conceptId));
+  const next = (input.focusConceptId ? eligible.find((r) => r.conceptId === input.focusConceptId) : undefined) ?? eligible[0];
   if (input.sessionSteps.length >= limits.review || !next) return { action: "complete", reason: next ? "review_session_limit" : "no_more_due_reviews" };
   const c = byId.get(next.conceptId)!;
   const kind: ActivityKind = c.history.reviewActivities % 2 === 0 ? "multiple_choice" : "free_response";
@@ -228,10 +229,11 @@ function planLesson(input: PlannerInput): PlannerDecision {
     return act(last.conceptId, "free_response", "defend", 2, "devils_advocate_on_correct_answer");
   }
 
-  // --- Interleaved recall: concepts that only lack an unprompted check, after ≥2 intervening steps on other concepts (or at the start of a new session).
+  // --- Interleaved recall: concepts that only lack an unprompted check, after ≥2 intervening steps on other concepts (or at the start of a new unfocused session).
   const lastIndexOf = (id: string) => steps.map((s) => s.conceptId).lastIndexOf(id);
   const recall = ordered(input.concepts).find((c) => {
     if (!c.needsRecall || c.status === "demonstrated") return false;
+    if (steps.length === 0 && input.focusConceptId && c.id !== input.focusConceptId) return false;
     const lastIdx = lastIndexOf(c.id);
     return lastIdx === -1 || steps.length - 1 - lastIdx >= MIN_RECALL_GAP;
   });
@@ -248,6 +250,8 @@ function planLesson(input: PlannerInput): PlannerDecision {
   if (focus && usable(focus)) {
     target = focus;
     reason = "learner_selected_focus";
+  } else if (focus && focus.status === "demonstrated" && perConcept(focus.id) === 0) {
+    return act(focus.id, "free_response", "transfer", 3, "learner_selected_focus:transfer_after_demonstration");
   }
   if (!target && last && last.kind !== "reflection") {
     const cur = byId.get(last.conceptId);

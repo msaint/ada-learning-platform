@@ -4,7 +4,7 @@ import { notFound } from "@/lib/errors";
 import type { FetchedSource } from "@/lib/ai/model-adapter";
 import type { ActivitySpec } from "@/lib/schemas/model";
 import type { ActivityFeedback, InlineError, LearnerActivity, SessionPhase, SessionView } from "@/lib/schemas/dto";
-import type { SessionKind } from "@/lib/learning/next-action";
+import { FINAL_MAX_CONCEPTS, lessonLimits, PLACEMENT_MAX, type SessionKind } from "@/lib/learning/next-action";
 
 export type SessionRow = {
   id: string;
@@ -111,6 +111,31 @@ export function phaseOf(s: SessionRow, a: ActivityRow | null): SessionPhase {
   return "feedback";
 }
 
+export function computeTargetSteps(input: {
+  kind: SessionKind;
+  position: number;
+  currentUnanswered: boolean;
+  stepCount: number;
+  planCount: number;
+  dueCount: number;
+  timeBudgetMinutesWeekly: number | null;
+  depth: string | null;
+}): number {
+  const pos = Math.max(1, input.position);
+  switch (input.kind) {
+    case "placement":
+      return Math.max(pos, Math.min(PLACEMENT_MAX, Math.max(1, input.planCount)));
+    case "assessment":
+      return Math.max(pos, Math.min(FINAL_MAX_CONCEPTS, Math.max(1, input.planCount)) + 1);
+    case "review": {
+      const answeredInSession = Math.max(0, input.stepCount - (input.currentUnanswered ? 1 : 0));
+      return Math.max(pos, Math.min(3, Math.max(1, answeredInSession + input.dueCount)));
+    }
+    default:
+      return Math.max(pos, lessonLimits(input.timeBudgetMinutesWeekly, input.depth).lesson);
+  }
+}
+
 export async function getSessionView(ownerId: string, sessionId: string, error: InlineError | null = null): Promise<SessionView & { error: InlineError | null }> {
   const s = await loadSession(db(), ownerId, sessionId);
   let activity: ActivityRow | null = null;
@@ -139,6 +164,40 @@ export async function getSessionView(ownerId: string, sessionId: string, error: 
     }
   }
   const position = activity?.sequence_no ?? 0;
+  let targetSteps: number | undefined;
+  if (s.status !== "completed") {
+    const [pacing] = await db()<{
+      time_budget_minutes_weekly: number | null;
+      depth: string | null;
+      plan_count: number;
+      due_count: number;
+      step_count: number;
+    }[]>`
+      select g.time_budget_minutes_weekly, g.depth,
+        coalesce(
+          (select jsonb_array_length(cv.plan_json->'required_slugs') from course_curriculum_versions cv
+           where cv.course_id = co.id and jsonb_typeof(cv.plan_json->'required_slugs') = 'array'
+           order by cv.version desc limit 1),
+          (select count(*)::int from concepts c where c.course_id = co.id)
+        )::int as plan_count,
+        (select count(*)::int from review_items r where r.course_id = co.id and r.status = 'active' and r.due_at <= now()) as due_count,
+        (select count(*)::int from activities act where act.session_id = ${s.id}) as step_count
+      from courses co
+      left join course_goal_versions g on g.id = co.active_goal_version_id
+      where co.id = ${s.course_id}`;
+    if (pacing) {
+      targetSteps = computeTargetSteps({
+        kind: s.kind,
+        position,
+        currentUnanswered: activity?.status === "presented" || activity?.status === "evaluating",
+        stepCount: pacing.step_count,
+        planCount: pacing.plan_count,
+        dueCount: pacing.due_count,
+        timeBudgetMinutesWeekly: pacing.time_budget_minutes_weekly,
+        depth: pacing.depth,
+      });
+    }
+  }
   const feedback: ActivityFeedback | null = attempt
     ? attempt.status === "graded"
       ? attempt.feedback_json
@@ -158,6 +217,7 @@ export async function getSessionView(ownerId: string, sessionId: string, error: 
     difficultyOffset: s.checkpoint_json.difficultyOffset ?? 0,
     phase: phaseOf(s, activity),
     position,
+    targetSteps,
     activity: activity && s.status !== "completed" ? toLearnerActivity(activity, conceptTitle) : null,
     draft,
     hints: activity?.hints_json.map((h) => h.text) ?? [],

@@ -65,6 +65,23 @@ export function CourseHeaderBar({ header }: { header: CourseHeader }) {
             <span className="mr-1.5">{header.intent === "goal" ? "Goal:" : "Exploring:"}</span>
             <span className="text-ink-soft">{header.goal.text}</span>
           </p>
+          {(header.conceptSummary && header.conceptSummary.total > 0) || header.reviewDueCount > 0 ? (
+            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted tabular-nums">
+              {header.conceptSummary && header.conceptSummary.total > 0 && (
+                <span>
+                  {header.intent === "goal"
+                    ? `${header.conceptSummary.demonstrated} of ${header.conceptSummary.total} concept${header.conceptSummary.total === 1 ? "" : "s"} demonstrated`
+                    : `${header.conceptSummary.demonstrated + header.conceptSummary.developing} of ${header.conceptSummary.total} concept${header.conceptSummary.total === 1 ? "" : "s"} explored`}
+                </span>
+              )}
+              {header.conceptSummary && header.conceptSummary.total > 0 && header.reviewDueCount > 0 && <span aria-hidden="true">·</span>}
+              {header.reviewDueCount > 0 && (
+                <Link href={`${base}?kind=review`} className="font-medium text-spark underline-offset-4 hover:underline">
+                  {header.reviewDueCount} review{header.reviewDueCount === 1 ? "" : "s"} due
+                </Link>
+              )}
+            </p>
+          ) : null}
         </div>
         <div ref={menuRef} className="relative">
           <button aria-label="Course options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} className="inline-flex size-11 items-center justify-center rounded-lg text-muted hover:bg-surface">

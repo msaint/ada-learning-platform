@@ -107,6 +107,7 @@ export function ActivityView(props: {
               return (
                 <label
                   key={c.id}
+                  data-disabled={props.disabled ? "true" : undefined}
                   className={clsx(
                     "choice-card-tactile flex min-h-14 cursor-pointer items-start gap-3.5 rounded-2xl border px-4 py-3.5",
                     fb

@@ -38,6 +38,8 @@ export async function getCourseHeader(ownerId: string, courseId: string, touch =
     select id, kind, status from sessions where course_id = ${courseId} and status in ('active','paused') limit 1`;
   const concepts = await loadConceptStates(db(), courseId);
   const finalPassed = await loadFinalPassed(db(), courseId);
+  const planConcepts = concepts.filter((c) => c.inPlan);
+  const scoped = planConcepts.length > 0 ? planConcepts : concepts;
   return {
     id: course.id,
     title: course.title,
@@ -50,6 +52,11 @@ export async function getCourseHeader(ownerId: string, courseId: string, touch =
     nextAction: computeNextAction(concepts, course.intent, open ?? null, { finalPassed }),
     openSession: open ?? null,
     reviewDueCount: concepts.filter((c) => c.display === "review_due").length,
+    conceptSummary: {
+      total: scoped.length,
+      demonstrated: scoped.filter((c) => c.mastery === "demonstrated").length,
+      developing: scoped.filter((c) => c.mastery === "developing").length,
+    },
   };
 }
 
@@ -293,6 +300,10 @@ export async function getOutline(ownerId: string, courseId: string): Promise<Out
         status: c.display,
         depth: Math.min(3, depthOf(c, byId)),
         prerequisiteTitles: c.prerequisiteIds.map((p) => byId.get(p)?.title ?? "").filter(Boolean),
+        unmetPrerequisiteTitles: c.prerequisiteIds
+          .map((p) => byId.get(p))
+          .filter((p): p is NonNullable<typeof p> => Boolean(p && p.mastery !== "demonstrated"))
+          .map((p) => p.title),
         unlocksTitles,
         relatedTitles,
         struggling: c.mastery !== "demonstrated" && misses >= 2,
@@ -315,8 +326,8 @@ export async function getProgress(ownerId: string, courseId: string, timezone: s
   const [counts] = await db()<{ sessions: number; activities: number }[]>`
     select (select count(*)::int from sessions where course_id = ${courseId}) as sessions,
            (select count(*)::int from activities where course_id = ${courseId}) as activities`;
-  const reviews = await db()<{ title: string; due_at: Date }[]>`
-    select c.title, r.due_at from review_items r join concepts c on c.id = r.concept_id
+  const reviews = await db()<{ concept_id: string; title: string; due_at: Date }[]>`
+    select c.id as concept_id, c.title, r.due_at from review_items r join concepts c on c.id = r.concept_id
     where r.course_id = ${courseId} and r.status = 'active' order by r.due_at limit 10`;
   const now = new Date();
   const finalPassed = await loadFinalPassed(db(), courseId);
@@ -325,9 +336,15 @@ export async function getProgress(ownerId: string, courseId: string, timezone: s
     intent: course.intent,
     goalText: goal.goal_text,
     concepts: concepts.map((c) => ({ id: c.id, title: c.title, status: c.display, evidenceCount: c.evidenceCount, reason: c.masteryReason })),
-    canDo: concepts.filter((c) => c.mastery === "demonstrated").map((c) => ({ title: c.title, criteria: c.criteria })),
-    needsPractice: concepts.filter((c) => c.mastery === "developing").map((c) => ({ title: c.title, reason: c.masteryReason })),
-    dueToRevisit: reviews.map((r) => ({ conceptTitle: r.title, dueAt: r.due_at.toISOString(), dueLabel: r.due_at <= now ? "Due now" : formatInZone(r.due_at, timezone) })),
+    canDo: concepts.filter((c) => c.mastery === "demonstrated").map((c) => ({ id: c.id, title: c.title, criteria: c.criteria })),
+    needsPractice: concepts.filter((c) => c.mastery === "developing").map((c) => ({ id: c.id, title: c.title, reason: c.masteryReason })),
+    dueToRevisit: reviews.map((r) => ({
+      conceptId: r.concept_id,
+      conceptTitle: r.title,
+      dueAt: r.due_at.toISOString(),
+      dueLabel: r.due_at <= now ? "Due now" : formatInZone(r.due_at, timezone),
+      dueNow: r.due_at <= now,
+    })),
     activity: counts,
     nextAction: computeNextAction(concepts, course.intent, open ?? null, { finalPassed }),
   };

@@ -20,10 +20,10 @@ export default async function LearnPage({ params, searchParams }: { params: Prom
       initialSession={session}
       nextAction={header.nextAction}
       intent={header.intent}
-      clearStartParam={sp.start === "1"}
+      clearStartParam={Boolean(sp.start === "1" || sp.focus || sp.kind)}
       autoStart={
         sp.focus
-          ? { focusConceptId: sp.focus }
+          ? { kind: sp.kind === "review" ? "review" : "lesson", focusConceptId: sp.focus }
           : sp.kind === "review"
             ? { kind: "review" }
             : // Fresh from setup: begin the first lesson right away (placement and reviews keep their own start screens).

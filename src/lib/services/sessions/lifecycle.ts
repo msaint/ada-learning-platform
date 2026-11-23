@@ -25,27 +25,41 @@ export async function startOrResumeSession(
       if (!c) throw notFound("Concept");
     }
     await t`update courses set last_opened_at = now() where id = ${courseId}`;
+    const requestedKind: SessionKind | undefined = opts.kind ?? (opts.focusConceptId ? "lesson" : undefined);
     const [open] = await t<SessionRow[]>`select * from sessions where course_id = ${courseId} and status in ('active','paused') for no key update`;
-    if (open && (!opts.kind || opts.kind === open.kind)) {
-      const checkpoint = opts.focusConceptId ? { ...open.checkpoint_json, focusConceptId: opts.focusConceptId } : open.checkpoint_json;
-      await t`update sessions set status = 'active', checkpoint_json = ${json(checkpoint)}, version = version + 1 where id = ${open.id}`;
-      if (open.status === "paused") await track(ownerId, "course_resumed", {}, t);
-      return { sessionId: open.id, needsActivity: !open.current_activity_id };
+    if (open && (!requestedKind || requestedKind === open.kind)) {
+      if (!opts.focusConceptId) {
+        await t`update sessions set status = 'active', version = version + 1 where id = ${open.id}`;
+        if (open.status === "paused") await track(ownerId, "course_resumed", {}, t);
+        return { sessionId: open.id, needsActivity: !open.current_activity_id };
+      }
+      const [curAct] = open.current_activity_id
+        ? await t<{ concept_id: string; status: string }[]>`select concept_id, status from activities where id = ${open.current_activity_id}`
+        : [];
+      if (!curAct || (curAct.concept_id === opts.focusConceptId && curAct.status === "presented")) {
+        if (open.checkpoint_json?.focusConceptId !== opts.focusConceptId) {
+          await t`delete from prepared_activities where session_id = ${open.id}`;
+        }
+        const checkpoint = { ...open.checkpoint_json, focusConceptId: opts.focusConceptId };
+        await t`update sessions set status = 'active', checkpoint_json = ${json(checkpoint)}, version = version + 1 where id = ${open.id}`;
+        if (open.status === "paused") await track(ownerId, "course_resumed", {}, t);
+        return { sessionId: open.id, needsActivity: !curAct };
+      }
     }
-    // A different session kind was explicitly requested: close the open one (its records persist).
+    // Close the open session when switching session kinds or pivoting to a different focused concept.
     if (open) await t`update sessions set status = 'completed', ended_at = now() where id = ${open.id}`;
     const [{ due }] = await t<{ due: number }[]>`
       select count(*)::int as due from review_items where course_id = ${courseId} and status = 'active' and due_at <= now()`;
-    if (opts.kind === "review" && due === 0) throw conflict("Nothing is due for review in this course.");
-    if (opts.kind === "placement" || opts.kind === "assessment") {
+    if (requestedKind === "review" && due === 0) throw conflict("Nothing is due for review in this course.");
+    if (requestedKind === "placement" || requestedKind === "assessment") {
       const concepts = await loadConceptStates(t, courseId);
       const plan = concepts.filter((c) => c.inPlan);
-      if (opts.kind === "placement" && plan.length < MIN_CONCEPTS_FOR_PLACEMENT) throw conflict("This course is too small for a placement check.");
-      if (opts.kind === "assessment" && (plan.length === 0 || plan.some((c) => c.mastery !== "demonstrated"))) {
+      if (requestedKind === "placement" && plan.length < MIN_CONCEPTS_FOR_PLACEMENT) throw conflict("This course is too small for a placement check.");
+      if (requestedKind === "assessment" && (plan.length === 0 || plan.some((c) => c.mastery !== "demonstrated"))) {
         throw conflict("The final check unlocks once every concept in the plan is demonstrated.");
       }
     }
-    const kind = opts.kind ?? (due > 0 && !opts.focusConceptId ? "review" : "lesson");
+    const kind = requestedKind ?? (due > 0 && !opts.focusConceptId ? "review" : "lesson");
     const [s] = await t<{ id: string }[]>`
       insert into sessions (course_id, owner_id, kind, checkpoint_json) values (${courseId}, ${ownerId}, ${kind}, ${json({ focusConceptId: opts.focusConceptId ?? null })})
       returning id`;

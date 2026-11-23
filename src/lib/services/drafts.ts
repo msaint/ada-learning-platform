@@ -72,13 +72,22 @@ export function buildTurns(topic: string, s: DraftState): DraftTurn[] {
 export function draftView(row: DraftRow): CourseDraftView {
   const s = row.state_json;
   const p = row.proposal_json;
+  const titleBySlug = p ? new Map(p.curriculum.concepts.map((c) => [c.slug, c.title])) : null;
   return {
     id: row.id,
     topic: row.topic,
     version: row.version,
     turns: buildTurns(row.topic, s),
     state: row.status,
-    nextQuestion: s.pending ? { text: s.pending.question, options: s.pending.options, field: s.pending.field } : undefined,
+    nextQuestion: s.pending
+      ? {
+          text: s.pending.question,
+          options: s.pending.options,
+          field: s.pending.field,
+          step: Math.min(s.answers.length + 1, MAX_QUESTIONS),
+          maxSteps: MAX_QUESTIONS,
+        }
+      : undefined,
     canGoBack: row.status !== "converted" && (s.answers.length > 0 || s.startNow),
     proposal: p
       ? {
@@ -87,6 +96,13 @@ export function draftView(row: DraftRow): CourseDraftView {
           intent: p.interpretation.intent,
           goalText: p.interpretation.goal_text,
           initialConceptTitles: p.curriculum.concepts.map((c) => c.title),
+          initialConcepts: p.curriculum.concepts.map((c) => ({
+            slug: c.slug,
+            title: c.title,
+            description: c.description,
+            prerequisiteTitles: c.prerequisites.map((slug) => titleBySlug?.get(slug) ?? slug),
+            isFirst: c.slug === p.curriculum.first_concept_slug,
+          })),
           suggestedMinutesWeekly: p.curriculum.suggested_minutes_weekly,
           cadenceNote: p.curriculum.cadence_note,
           assumptions: p.interpretation.assumptions,
@@ -354,16 +370,18 @@ export async function proposeDraft(ownerId: string, draftId: string, input: { ad
 }
 
 /** Transactionally creates the course, goal v1, concept graph and curriculum v1. Exactly once per draft. */
-export async function convertDraft(ownerId: string, draftId: string): Promise<{ courseId: string; created: boolean }> {
+export async function convertDraft(ownerId: string, draftId: string, customTitle?: string): Promise<{ courseId: string; created: boolean }> {
   const result = await tx(async (t) => {
     const row = await loadForUpdate(t, draftId, ownerId);
     if (row.status === "converted" && row.converted_course_id) return { courseId: row.converted_course_id, created: false };
     if (row.status !== "ready" || !row.proposal_json) throw conflict("The course plan isn't ready yet.");
     await assertGuestMayCreateCourse(t, ownerId, true);
     const { curriculum: plan, interpretation: interp, modelInfo } = row.proposal_json;
+    const sanitizedCustom = customTitle?.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
+    const courseTitle = (sanitizedCustom || plan.title).slice(0, 120);
     const [course] = await t<{ id: string }[]>`
       insert into courses (owner_id, draft_id, title, topic, intent)
-      values (${ownerId}, ${row.id}, ${plan.title.slice(0, 120)}, ${row.topic}, ${interp.intent}) returning id`;
+      values (${ownerId}, ${row.id}, ${courseTitle}, ${row.topic}, ${interp.intent}) returning id`;
     const [goal] = await t<{ id: string }[]>`
       insert into course_goal_versions (course_id, version, intent, goal_text, success_criteria_json, time_budget_minutes_weekly, baseline_json, depth, reason)
       values (${course.id}, 1, ${interp.intent}, ${interp.goal_text}, ${json(plan.success_criteria.length ? plan.success_criteria : interp.success_criteria)},

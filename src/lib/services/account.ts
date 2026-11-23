@@ -6,6 +6,19 @@ import { emailEnabled } from "@/lib/email/mailer";
 import { sendVerification } from "@/lib/services/email";
 import type { DueReview } from "@/lib/schemas/dto";
 
+const DAY_MS = 86_400_000;
+
+export function describeDueReview(dueAt: Date, now: Date, timezone: string): { dueLabel: string; overdue: boolean } {
+  if (dueAt > now) {
+    return { dueLabel: formatInZone(dueAt, timezone), overdue: false };
+  }
+  const daysLate = Math.floor((now.getTime() - dueAt.getTime()) / DAY_MS);
+  if (daysLate >= 1) {
+    return { dueLabel: `Overdue · ${daysLate}d`, overdue: true };
+  }
+  return { dueLabel: "Due today", overdue: false };
+}
+
 export async function dueReviews(ownerId: string, timezone: string, includeUpcoming = false): Promise<{ due: DueReview[]; upcoming: DueReview[] }> {
   const rows = await db()<{ id: string; course_id: string; course_title: string; concept_id: string; concept_title: string; due_at: Date }[]>`
     select r.id, r.course_id, co.title as course_title, r.concept_id, c.title as concept_title, r.due_at
@@ -14,16 +27,19 @@ export async function dueReviews(ownerId: string, timezone: string, includeUpcom
       and r.due_at <= now() + ${includeUpcoming ? "7 days" : "0 days"}::interval
     order by r.due_at limit 100`;
   const now = new Date();
-  const map = (r: (typeof rows)[number]): DueReview => ({
-    id: r.id,
-    courseId: r.course_id,
-    courseTitle: r.course_title,
-    conceptId: r.concept_id,
-    conceptTitle: r.concept_title,
-    dueAt: r.due_at.toISOString(),
-    dueLabel: r.due_at <= now ? "Due now" : formatInZone(r.due_at, timezone),
-    overdue: r.due_at <= now,
-  });
+  const map = (r: (typeof rows)[number]): DueReview => {
+    const { dueLabel, overdue } = describeDueReview(r.due_at, now, timezone);
+    return {
+      id: r.id,
+      courseId: r.course_id,
+      courseTitle: r.course_title,
+      conceptId: r.concept_id,
+      conceptTitle: r.concept_title,
+      dueAt: r.due_at.toISOString(),
+      dueLabel,
+      overdue,
+    };
+  };
   return { due: rows.filter((r) => r.due_at <= now).map(map), upcoming: rows.filter((r) => r.due_at > now).map(map) };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { GitBranch } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, newKey } from "@/lib/client/api";
@@ -11,7 +12,7 @@ import { ActivityView } from "./activity-renderer";
 import { FeedbackPanel } from "./feedback";
 
 type View = SessionView & { error?: InlineErrorT | null };
-type Busy = null | "start" | "submit" | "next" | "hint" | "explain" | "pause" | "skip" | "reveal" | "difficulty" | "flag" | "breakdown";
+type Busy = null | "start" | "submit" | "next" | "hint" | "explain" | "pause" | "skip" | "reveal" | "difficulty" | "flag" | "breakdown" | "branch";
 const KIND_LABEL: Record<SessionView["kind"], string> = { lesson: "Lesson", review: "Review", placement: "Placement", assessment: "Final check" };
 
 export function LessonPlayer({
@@ -37,6 +38,8 @@ export function LessonPlayer({
   const [text, setText] = useState<string>(initialSession?.draft?.value.text ?? "");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "conflict">("idle");
   const [streak, setStreak] = useState(0);
+  const [detourOpen, setDetourOpen] = useState(false);
+  const [detourText, setDetourText] = useState("");
   const lastGradedActivityIdRef = useRef<string | null>(null);
 
   const draftVersion = useRef(initialSession?.draft?.version ?? 0);
@@ -60,6 +63,8 @@ export function LessonPlayer({
       attemptKey.current = newKey();
       assistKey.current = newKey();
       setSaveState("idle");
+      setDetourOpen(false);
+      setDetourText("");
     }
     if (s.phase === "feedback" && s.feedback?.status === "graded" && s.activity?.id && lastGradedActivityIdRef.current !== s.activity.id) {
       lastGradedActivityIdRef.current = s.activity.id;
@@ -108,17 +113,23 @@ export function LessonPlayer({
     [call, courseId, router],
   );
 
+  const autoStartKind = autoStart?.kind ?? "";
+  const autoStartFocus = autoStart?.focusConceptId ?? "";
+
   useEffect(() => {
-    if (autoStart && !started.current) {
+    if ((autoStartKind || autoStartFocus) && !started.current) {
       started.current = true;
-      start(autoStart);
+      start({
+        ...(autoStartKind ? { kind: autoStartKind as SessionView["kind"] } : {}),
+        ...(autoStartFocus ? { focusConceptId: autoStartFocus } : {}),
+      });
     }
-    // Drop the one-shot ?start=1 so a later reload doesn't begin another session.
+    // Drop one-shot query params (?start=1, ?focus=..., ?kind=...) so reloading later doesn't restart the session.
     if (clearStartParam && !cleared.current) {
       cleared.current = true;
       window.history.replaceState(null, "", `/app/courses/${courseId}`);
     }
-  }, [autoStart, start, clearStartParam, courseId]);
+  }, [autoStartKind, autoStartFocus, start, clearStartParam, courseId]);
 
   const saveDraft = useCallback(
     (value: { choiceId?: string; text?: string }) => {
@@ -142,26 +153,56 @@ export function LessonPlayer({
     [activityId],
   );
 
-  // Keyboard shortcuts 1–4 for multiple-choice options when not typing in a field
-  useEffect(() => {
-    if (sessionStatus !== "active" || sessionPhase !== "awaiting_response" || busy) return;
+  const submitRef = useRef<() => void>(() => {});
+  const nextRef = useRef<() => void>(() => {});
+  const pickChoiceRef = useRef<(idx: number) => void>(() => {});
+  submitRef.current = () => {
+    void submit();
+  };
+  nextRef.current = () => {
+    void next();
+  };
+  pickChoiceRef.current = (idx: number) => {
     const act = session?.activity;
     if (!act || act.kind !== "multiple_choice") return;
-    const choices = act.choices;
+    const picked = act.choices[idx];
+    if (!picked) return;
+    setChoice(picked.id);
+    saveDraft({ choiceId: picked.id });
+  };
+
+  const activityKind = session?.activity?.kind ?? null;
+  const isBusy = busy !== null;
+  const hasChoice = Boolean(choice);
+
+  // Keyboard flow when not typing in an input or focusing an interactive button/link:
+  // - Multiple choice: 1–5 selects an option; Enter submits once an option is selected.
+  // - Explanation: Enter advances to the next activity.
+  useEffect(() => {
+    if (sessionStatus !== "active" || sessionPhase !== "awaiting_response" || isBusy || !activityKind) return;
     function onKey(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      const idx = Number(e.key) - 1;
-      if (idx >= 0 && idx < choices.length) {
-        const picked = choices[idx];
-        setChoice(picked.id);
-        saveDraft({ choiceId: picked.id });
+      if (activityKind === "multiple_choice") {
+        const idx = Number(e.key) - 1;
+        if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
+          pickChoiceRef.current(idx);
+          return;
+        }
+        if (e.key === "Enter" && hasChoice && tag !== "BUTTON" && tag !== "A" && tag !== "SUMMARY") {
+          e.preventDefault();
+          submitRef.current();
+        }
+      } else if (activityKind === "explanation" && e.key === "Enter" && tag !== "BUTTON" && tag !== "A" && tag !== "SUMMARY") {
+        e.preventDefault();
+        nextRef.current();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessionStatus, sessionPhase, busy, session?.activity, saveDraft]);
+  }, [sessionStatus, sessionPhase, isBusy, activityKind, hasChoice]);
 
   async function submit(skipped = false) {
     if (!session?.activity) return;
@@ -224,15 +265,32 @@ export function LessonPlayer({
     setError(null);
     try {
       const r = await api<{ firstConceptId: string }>(`/courses/${courseId}/concepts/${conceptId}/breakdown`, { body: {} });
-      let nextView = (await api<{ session: View }>(`/courses/${courseId}/sessions`, { body: { kind: "lesson", focusConceptId: r.firstConceptId } })).session;
-      if (nextView.status === "active" && nextView.phase === "feedback" && nextView.activity) {
-        nextView = (await api<{ session: View }>(`/sessions/${nextView.id}/next`, { body: { fromActivityId: nextView.activity.id } })).session;
-      }
+      const nextView = (await api<{ session: View }>(`/courses/${courseId}/sessions`, { body: { kind: "lesson", focusConceptId: r.firstConceptId } })).session;
       adopt(nextView, { resetInput: true });
       router.refresh();
     } catch (e) {
       const err = e instanceof ApiError ? e : null;
       setError({ message: err?.message ?? "Couldn't break this concept into simpler steps.", retry: err?.retryable ? () => breakdown(conceptId) : undefined });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function startDetour() {
+    const q = detourText.trim().slice(0, 300);
+    if (q.length < 2) return;
+    setBusy("branch");
+    setError(null);
+    try {
+      const r = await api<{ firstConceptId: string }>(`/courses/${courseId}/branches`, { body: { question: q } });
+      const nextView = (await api<{ session: View }>(`/courses/${courseId}/sessions`, { body: { kind: "lesson", focusConceptId: r.firstConceptId } })).session;
+      setStreak(0);
+      lastGradedActivityIdRef.current = null;
+      adopt(nextView, { resetInput: true });
+      router.refresh();
+    } catch (e) {
+      const err = e instanceof ApiError ? e : null;
+      setError({ message: err?.message ?? "Couldn't open that side branch.", retry: err?.retryable ? () => startDetour() : undefined });
     } finally {
       setBusy(null);
     }
@@ -254,7 +312,7 @@ export function LessonPlayer({
 
   if (!session || session.status === "completed") {
     const s = session?.summary;
-    const linkClass = "inline-flex min-h-11 items-center rounded-xl px-4 text-[0.95rem] text-muted hover:bg-surface hover:text-ink";
+    const linkClass = "inline-flex min-h-11 items-center rounded-xl px-4 text-[0.95rem] whitespace-nowrap text-muted hover:bg-surface hover:text-ink";
     const RESULT_MARK: Record<string, string> = { correct: "✓", partial: "~", incorrect: "✗", unknown: "–" };
     const RESULT_SR: Record<string, string> = { correct: "knew it", partial: "partly", incorrect: "not yet", unknown: "skipped" };
 
@@ -292,7 +350,7 @@ export function LessonPlayer({
           ) : s ? (
             <>
               <h2 id="learn-start" className="mb-2 text-xl font-semibold text-ink">Session complete</h2>
-              <p className="mb-6 text-ink-soft">
+              <p className="mb-6 text-ink-soft tabular-nums">
                 {s.assessed > 0 ? `You answered ${s.assessed} question${s.assessed === 1 ? "" : "s"}, ${s.correct} correct.` : "Nice work."}{" "}
                 {s.conceptsTouched.length > 0 && <>Covered: {s.conceptsTouched.join(", ")}.</>}
               </p>
@@ -329,46 +387,67 @@ export function LessonPlayer({
             <h2 id="learn-start" className="mb-6 text-xl font-semibold text-ink">{busy === "start" ? "Preparing your next activity…" : nextAction.label}</h2>
           )}
         </div>
-        {busy === "start" ? (
-          <Spinner label="Ada is preparing an activity for you…" />
+        {busy === "start" || busy === "branch" ? (
+          <ActivitySkeleton label={busy === "branch" ? "Adding that branch to your course…" : "Ada is preparing an activity for you…"} />
         ) : (
-          <div className="flex flex-wrap gap-2.5">
-            {s?.placement ? (
-              <>
-                <Button variant="primary" onClick={() => start(s.suggestedConceptId ? { kind: "lesson", focusConceptId: s.suggestedConceptId } : { kind: "lesson" })}>
-                  {s.suggestedConceptId ? `Start with ${s.placement.find((p) => p.conceptId === s.suggestedConceptId)?.title ?? "the suggested concept"}` : "Start learning"}
-                </Button>
-                <Link href={`/app/courses/${courseId}/outline`} className={linkClass}>
-                  Choose another concept
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2.5">
+              {s?.placement ? (
+                <>
+                  <Button variant="primary" onClick={() => start(s.suggestedConceptId ? { kind: "lesson", focusConceptId: s.suggestedConceptId } : { kind: "lesson" })}>
+                    {s.suggestedConceptId ? `Start with ${s.placement.find((p) => p.conceptId === s.suggestedConceptId)?.title ?? "the suggested concept"}` : "Start learning"}
+                  </Button>
+                  <Link href={`/app/courses/${courseId}/outline`} className={linkClass}>
+                    Choose another concept
+                  </Link>
+                </>
+              ) : nextAction.kind === "placement" ? (
+                <>
+                  <Button variant="primary" onClick={() => start({ kind: "placement" })}>Start placement</Button>
+                  <Button onClick={() => start({ kind: "lesson" })}>Skip — start from the beginning</Button>
+                </>
+              ) : nextAction.kind === "assessment" ? (
+                <>
+                  <Button variant="primary" onClick={() => start({ kind: "assessment" })}>Start final check</Button>
+                  <Button onClick={() => start({ kind: "lesson" })}>Keep practising first</Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="primary" onClick={() => start(nextAction.kind === "review" ? { kind: "review" } : { kind: "lesson" })}>
+                    {s ? (nextAction.kind === "review" ? "Start review" : "Keep going") : nextAction.kind === "review" ? "Start review" : "Start"}
+                  </Button>
+                  {nextAction.kind === "review" && <Button onClick={() => start({ kind: "lesson" })}>Learn something new instead</Button>}
+                </>
+              )}
+              {s && !s.placement && (
+                <Link href={`/app/courses/${courseId}/progress`} className={linkClass}>
+                  See progress
                 </Link>
-              </>
-            ) : nextAction.kind === "placement" ? (
-              <>
-                <Button variant="primary" onClick={() => start({ kind: "placement" })}>Start placement</Button>
-                <Button onClick={() => start({ kind: "lesson" })}>Skip — start from the beginning</Button>
-              </>
-            ) : nextAction.kind === "assessment" ? (
-              <>
-                <Button variant="primary" onClick={() => start({ kind: "assessment" })}>Start final check</Button>
-                <Button onClick={() => start({ kind: "lesson" })}>Keep practising first</Button>
-              </>
-            ) : (
-              <>
-                <Button variant="primary" onClick={() => start(nextAction.kind === "review" ? { kind: "review" } : { kind: "lesson" })}>
-                  {s ? (nextAction.kind === "review" ? "Start review" : "Keep going") : nextAction.kind === "review" ? "Start review" : "Start"}
+              )}
+              {s && !s.placement && !s.assessment && !detourOpen && (
+                <Button variant="quiet" onClick={() => setDetourOpen(true)}>
+                  <GitBranch className="size-4" aria-hidden />
+                  <span>Ask a side question</span>
                 </Button>
-                {nextAction.kind === "review" && <Button onClick={() => start({ kind: "lesson" })}>Learn something new instead</Button>}
-              </>
-            )}
-            {s && !s.placement && (
-              <Link href={`/app/courses/${courseId}/progress`} className={linkClass}>
-                See progress
-              </Link>
-            )}
-            {intent === "curiosity" && s && (
-              <Link href={`/app/courses/${courseId}/outline`} className={linkClass}>
-                Explore a branch
-              </Link>
+              )}
+              {intent === "curiosity" && s && (
+                <Link href={`/app/courses/${courseId}/outline`} className={linkClass}>
+                  Course outline
+                </Link>
+              )}
+            </div>
+
+            {detourOpen && (
+              <DetourForm
+                value={detourText}
+                onChange={setDetourText}
+                onSubmit={startDetour}
+                onCancel={() => {
+                  setDetourOpen(false);
+                  setDetourText("");
+                }}
+                busy={false}
+              />
             )}
           </div>
         )}
@@ -398,17 +477,24 @@ export function LessonPlayer({
   const assessable = a && (a.kind === "multiple_choice" || a.kind === "free_response");
   const measuring = session.kind === "placement" || session.kind === "assessment";
 
-  // Smooth momentum progress bar (typically 6–8 steps per adaptive session)
   const stepNum = Math.max(1, session.position || 1);
-  const progressPct = Math.min(96, Math.round((stepNum / 7) * 100));
+  const targetSteps = Math.max(stepNum, session.targetSteps ?? 8);
+  const fixedLength = session.kind !== "lesson";
+  const completedRatio = answered && fixedLength && stepNum >= targetSteps ? 1 : answered ? stepNum / targetSteps : (stepNum - 0.35) / targetSteps;
+  const progressPct = Math.max(8, Math.min(fixedLength && answered && stepNum >= targetSteps ? 100 : 96, Math.round(completedRatio * 100)));
+  const stepLabel = session.targetSteps
+    ? fixedLength
+      ? `${stepNum} of ${targetSteps}`
+      : `step ${stepNum} of ~${targetSteps}`
+    : `step ${stepNum}`;
 
   return (
     <section aria-label={KIND_LABEL[session.kind]} className="py-2">
       {/* Session Momentum Header */}
       <div className="mb-6">
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted">
-          <span className="min-w-0 truncate">
-            {KIND_LABEL[session.kind]} · step {stepNum}
+          <span className="min-w-0 truncate tabular-nums">
+            {KIND_LABEL[session.kind]} · {stepLabel}
             {a ? ` · ${a.conceptTitle}` : ""}
           </span>
           <div className="flex shrink-0 items-center gap-3">
@@ -422,17 +508,25 @@ export function LessonPlayer({
             </Button>
           </div>
         </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-surface" aria-hidden="true">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-spark via-accent to-prism transition-all duration-500 ease-out"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
+        <svg viewBox="0 0 100 2" preserveAspectRatio="none" className="block h-2 w-full overflow-hidden rounded-full bg-surface" aria-hidden="true">
+          <defs>
+            <linearGradient id="ada-progress-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--color-spark)" />
+              <stop offset="50%" stopColor="var(--color-accent)" />
+              <stop offset="100%" stopColor="var(--color-prism)" />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width={progressPct} height="2" rx="1" fill="url(#ada-progress-grad)" className="transition-all duration-300 ease-out" />
+        </svg>
       </div>
 
       {!a || phase === "choosing_next" ? (
-        <div ref={focusRef} tabIndex={-1} className="space-y-4 py-6 focus:outline-none">
-          {busy === "next" ? <Spinner label="Preparing the next activity…" /> : !error && <Button variant="primary" onClick={next}>Continue</Button>}
+        <div ref={focusRef} tabIndex={-1} className="space-y-4 py-4 focus:outline-none">
+          {busy === "next" || busy === "branch" ? (
+            <ActivitySkeleton label={busy === "branch" ? "Adding that branch to your course…" : "Preparing the next activity…"} />
+          ) : (
+            !error && <Button variant="primary" onClick={next}>Continue</Button>
+          )}
         </div>
       ) : (
         <>
@@ -474,8 +568,11 @@ export function LessonPlayer({
                   </span>
                 )}
                 {a.kind === "multiple_choice" && (
-                  <span className="hidden text-xs text-muted sm:inline">Press 1–{a.choices.length} to pick</span>
+                  <span className="hidden text-xs text-muted sm:inline">
+                    Press 1–{a.choices.length} to pick{choice ? " · Enter to check" : ""}
+                  </span>
                 )}
+                {a.kind === "explanation" && <span className="hidden text-xs text-muted sm:inline">Press Enter to continue</span>}
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-1" aria-label="Help">
                 {measuring ? (
@@ -488,12 +585,18 @@ export function LessonPlayer({
                   <>
                     {assessable && (
                       <Button variant="quiet" size="sm" onClick={() => assist("hint")} busy={busy === "hint"} disabled={!!busy || session.hints.length >= 3}>
-                        Hint
+                        {session.hints.length > 0 ? `Hint (${session.hints.length}/3)` : "Hint"}
                       </Button>
                     )}
                     <Button variant="quiet" size="sm" onClick={() => assist("explain")} busy={busy === "explain"} disabled={!!busy || session.altExplanations.length >= 3}>
-                      Explain differently
+                      {session.altExplanations.length > 0 ? `Explain differently (${session.altExplanations.length}/3)` : "Explain differently"}
                     </Button>
+                    {a.kind === "explanation" && session.kind === "lesson" && !detourOpen && (
+                      <Button variant="quiet" size="sm" onClick={() => setDetourOpen(true)} disabled={!!busy}>
+                        <GitBranch className="size-3.5" aria-hidden />
+                        <span>Ask a side question</span>
+                      </Button>
+                    )}
                     {(assessable || a.kind === "reflection") && (
                       <Button variant="quiet" size="sm" onClick={() => submit(true)} busy={busy === "skip"} disabled={!!busy}>
                         {a.kind === "reflection" ? "Skip" : "Show me the answer"}
@@ -512,6 +615,20 @@ export function LessonPlayer({
                   </span>
                 )}
               </div>
+              {detourOpen && a.kind === "explanation" && session.kind === "lesson" && (
+                <div className="mt-3">
+                  <DetourForm
+                    value={detourText}
+                    onChange={setDetourText}
+                    onSubmit={startDetour}
+                    onCancel={() => {
+                      setDetourOpen(false);
+                      setDetourText("");
+                    }}
+                    busy={busy === "branch"}
+                  />
+                </div>
+              )}
               {measuring && <p className="mt-2 text-xs text-muted">{session.kind === "placement" ? "No hints during placement. It's fine not to know — that's what this finds out." : "No hints during the final check."}</p>}
               {session.kind === "lesson" && session.difficultyOffset !== 0 && (
                 <p className="mt-2 text-xs text-muted" aria-live="polite">{session.difficultyOffset > 0 ? "Harder questions from the next one." : "Easier questions from the next one."}</p>
@@ -545,9 +662,29 @@ export function LessonPlayer({
                         Break this into simpler steps
                       </Button>
                     )}
+                    {session.kind === "lesson" && !detourOpen && (
+                      <Button variant="quiet" onClick={() => setDetourOpen(true)} disabled={!!busy}>
+                        <GitBranch className="size-4" aria-hidden />
+                        <span>Ask a side question</span>
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
+              {detourOpen && session.kind === "lesson" && phase === "feedback" && (
+                <div className="mt-4">
+                  <DetourForm
+                    value={detourText}
+                    onChange={setDetourText}
+                    onSubmit={startDetour}
+                    onCancel={() => {
+                      setDetourOpen(false);
+                      setDetourText("");
+                    }}
+                    busy={busy === "branch"}
+                  />
+                </div>
+              )}
             </div>
           )}
         </>
@@ -560,5 +697,77 @@ export function LessonPlayer({
       )}
       <p className="mt-10 text-xs text-muted">{session.devModel ? "Placeholder content from the development model — not real AI." : "AI-generated lesson content. It can contain mistakes; check anything high-stakes."}</p>
     </section>
+  );
+}
+
+function DetourForm({
+  value,
+  onChange,
+  onSubmit,
+  onCancel,
+  busy,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (value.trim().length >= 2 && !busy) onSubmit();
+      }}
+      className="rounded-xl border border-line bg-surface/80 p-3.5"
+    >
+      <label htmlFor="lesson-detour" className="mb-1.5 block text-xs font-medium text-ink">
+        What side question should Ada add as a branch?
+      </label>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          id="lesson-detour"
+          autoFocus
+          value={value}
+          maxLength={300}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          placeholder="e.g. Why doesn't wheel conicity cause oscillation at high speed?"
+          className="min-h-10 flex-1 rounded-xl border border-line-strong bg-paper px-3.5 text-sm text-ink placeholder:text-muted/75 focus:border-accent/70 focus:outline-none"
+        />
+        <div className="flex items-center gap-1.5">
+          <Button type="submit" size="sm" variant="secondary" busy={busy} disabled={value.trim().length < 2}>
+            Branch into this
+          </Button>
+          <Button type="button" size="sm" variant="quiet" disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function ActivitySkeleton({ label }: { label: string }) {
+  return (
+    <div className="space-y-5 rounded-2xl border border-line bg-surface/50 p-5" role="status" aria-live="polite">
+      <Spinner label={label} />
+      <div className="space-y-3 pt-1" aria-hidden="true">
+        <div className="h-3 w-28 animate-pulse rounded bg-elevated" />
+        <div className="h-5 w-4/5 animate-pulse rounded bg-elevated" />
+        <div className="h-5 w-3/5 animate-pulse rounded bg-elevated" />
+        <div className="grid gap-2.5 pt-3">
+          <div className="h-12 w-full animate-pulse rounded-xl bg-elevated/70" />
+          <div className="h-12 w-full animate-pulse rounded-xl bg-elevated/70" />
+          <div className="h-12 w-full animate-pulse rounded-xl bg-elevated/70" />
+        </div>
+      </div>
+    </div>
   );
 }

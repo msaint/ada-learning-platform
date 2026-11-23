@@ -21,6 +21,7 @@ export default async function ProgressPage({ params }: { params: Promise<{ cours
   const { courseId } = await params;
   const p = await getProgress(user.id, courseId, user.timezone);
   const empty = p.concepts.every((c) => c.evidenceCount === 0);
+  const anyDueNow = p.dueToRevisit.some((r) => r.dueNow);
 
   return (
     <div>
@@ -69,8 +70,16 @@ export default async function ProgressPage({ params }: { params: Promise<{ cours
             ) : (
               <ul className="space-y-2 text-sm">
                 {p.needsPractice.map((c) => (
-                  <li key={c.title}>
-                    <span className="font-medium">{c.title}</span> <span className="text-ink-soft">— {c.reason}</span>
+                  <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium text-ink">{c.title}</span> <span className="text-ink-soft">— {c.reason}</span>
+                    </span>
+                    <Link
+                      href={`/app/courses/${courseId}?focus=${c.id}`}
+                      className="shrink-0 text-xs font-medium text-spark underline-offset-4 hover:underline"
+                    >
+                      Practise
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -83,14 +92,23 @@ export default async function ProgressPage({ params }: { params: Promise<{ cours
         {p.dueToRevisit.length === 0 ? (
           <p className="text-sm text-muted">No reviews scheduled yet.</p>
         ) : (
-          <ul className="space-y-1 text-sm">
-            {p.dueToRevisit.map((r) => (
-              <li key={r.conceptTitle} className="flex justify-between gap-4">
-                <span>{r.conceptTitle}</span>
-                <span className="text-muted">{r.dueLabel}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="space-y-1.5 text-sm">
+              {p.dueToRevisit.map((r) => (
+                <li key={r.conceptId} className="flex items-baseline justify-between gap-4">
+                  <span className="min-w-0 break-words">{r.conceptTitle}</span>
+                  <span className={r.dueNow ? "shrink-0 font-medium text-spark" : "shrink-0 text-muted"}>{r.dueLabel}</span>
+                </li>
+              ))}
+            </ul>
+            {anyDueNow && (
+              <p className="mt-3">
+                <Link href={`/app/courses/${courseId}?kind=review`} className="text-sm font-medium text-spark underline-offset-4 hover:underline">
+                  Start due review
+                </Link>
+              </p>
+            )}
+          </>
         )}
       </Section>
 
@@ -126,11 +144,16 @@ export default async function ProgressPage({ params }: { params: Promise<{ cours
       )}
 
       <Section title="All concepts">
-        <ul className="divide-y divide-line rounded-xl border border-line text-sm">
+        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line text-sm">
           {p.concepts.map((c) => (
-            <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
-              <span className="min-w-0 flex-1 break-words">{c.title}</span>
-              <StatusBadge status={c.status} />
+            <li key={c.id}>
+              <Link
+                href={`/app/courses/${courseId}?focus=${c.id}`}
+                className="flex min-h-11 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface"
+              >
+                <span className="min-w-0 flex-1 break-words text-ink">{c.title}</span>
+                <StatusBadge status={c.status} />
+              </Link>
             </li>
           ))}
         </ul>
